@@ -1,0 +1,6 @@
+{
+  "name": "Nuts & Bolts Game",
+  "description": "Nut & Bolt puzzle game with deterministic level generation, color sorting, and grandmaster mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
