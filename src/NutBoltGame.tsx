@@ -97,22 +97,24 @@ const NUT_TYPES = [
 //   total ≤ 7          → 1 row
 //   total 8–14         → 2 rows
 //   total ≥ 15         → 3 rows
-function getTargetRowCount(totalBolts) {
-  if (totalBolts <= 7) return 1;
+function getTargetRowCount(totalBolts, capacity) {
+  if (totalBolts <= 6) return 1;
+  if (capacity <= 5) {
+    if (totalBolts <= 10) return 2;
+    return 3;
+  }
   if (totalBolts <= 14) return 2;
   return 3;
 }
 
-// Distribute bolts evenly with the approved remainder placement:
-// one extra goes to row 2; two extras go to top and bottom rows.
+// Distribute bolts evenly with max 1 bolt difference:
+// remainders are distributed from the top row downwards.
 function computeRowSizes(totalBolts, rows) {
   const baseRowSize = Math.floor(totalBolts / rows);
   const remainder = totalBolts % rows;
   const rowSizes = Array.from({ length: rows }, () => baseRowSize);
-  if (remainder === 1) rowSizes[1] += 1;
-  if (remainder === 2) {
-    rowSizes[0] += 1;
-    rowSizes[rows - 1] += 1;
+  for (let i = 0; i < remainder; i++) {
+    rowSizes[i] += 1;
   }
   return rowSizes;
 }
@@ -196,41 +198,28 @@ function choosePaletteIds(level, colors, tutorialIds) {
   // Extra pair if we need more than 24 colors
   const extraPair = ['light-teal', 'dark-teal'];
   
-  const pool = [...baseIds];
+  let pool = [...baseIds];
   
   if (colors > 10) {
-    let variantsNeeded = colors - 10;
-    const shuffledReplaceable = seededAdvancedShuffle(replaceable, level * 149 + 29, 2);
-    let replaceIndex = 0;
-    
-    // Replace base colors with their light/dark variants (adds +1 color per replacement)
-    while (variantsNeeded > 0 && replaceIndex < shuffledReplaceable.length) {
-      const { base, variants } = shuffledReplaceable[replaceIndex];
-      const baseIdx = pool.indexOf(base);
-      if (baseIdx !== -1) {
-        pool.splice(baseIdx, 1, ...variants);
-        variantsNeeded--;
-      }
-      replaceIndex++;
+    pool = ['yellow', 'white', 'brown']; // unreplaceable bases
+    for (const r of replaceable) {
+      pool.push(...r.variants);
     }
-    
-    if (variantsNeeded > 0) {
-       pool.push(...extraPair);
-    }
+    pool.push(...extraPair);
   }
   
   // We have a pool of colors (which contains no direct light/dark variants of the *same* base if the base is present).
   // But we still want to avoid conflicts between different bases, like brown vs dark-orange.
   const conflicts = {
-    'brown': ['dark-orange', 'dark-red'],
-    'yellow': ['light-orange', 'light-green'],
+    'brown': ['dark-orange', 'dark-red', 'orange', 'red'],
+    'yellow': ['light-orange', 'light-green', 'orange'],
     'white': ['light-grey'],
     'grey': ['dark-grey'],
-    'dark-orange': ['brown', 'dark-red'],
-    'light-orange': ['yellow'],
+    'dark-orange': ['brown', 'dark-red', 'orange'],
+    'light-orange': ['yellow', 'orange'],
     'light-grey': ['white'],
-    'dark-red': ['brown', 'dark-orange'],
-    'light-green': ['yellow']
+    'dark-red': ['brown', 'dark-orange', 'red'],
+    'light-green': ['yellow', 'green']
   };
 
   const shuffledPool = seededAdvancedShuffle(pool, level * 151 + 31, 2);
@@ -308,7 +297,7 @@ function generateDeterministicLevelConfig(level) {
       ? 1 + Math.floor(seededRandom(level * 571) * Math.min(3, Math.floor(activeBolts * 0.4)))
       : 0;
   const colors = tutorial ? tutorial.colors : activeBolts - duplicateStacks;
-  const rows = getTargetRowCount(totalBolts);
+  const rows = getTargetRowCount(totalBolts, capacity);
   const rowSizes = computeRowSizes(totalBolts, rows);
   const hiddenActiveCount = tutorial
     ? tutorial.hiddenActiveCount
@@ -349,10 +338,12 @@ function assertLevelConfig(config, previous) {
   if (config.hiddenActiveCount > config.activeBolts) fail('hidden bolts cannot include empty bolts');
   if (config.scramblePairs > Math.floor(config.activeBolts / 2)) fail('too many independent scramble pairs');
   if (config.solutionMoveUpperBound < 4 || config.solutionMoveUpperBound > 20) fail('solution budget outside supported range');
-  if (config.rows !== getTargetRowCount(config.totalBolts)) fail('incorrect row count');
+  if (config.rows !== getTargetRowCount(config.totalBolts, config.capacity)) fail('incorrect row count');
   const remainder = config.totalBolts % config.rows;
-  if (remainder === 1 && config.rowSizes[1] !== Math.floor(config.totalBolts / config.rows) + 1) fail('single remainder must be in row 2');
-  if (remainder === 2 && (config.rowSizes[0] !== Math.floor(config.totalBolts / config.rows) + 1 || config.rowSizes[config.rows - 1] !== Math.floor(config.totalBolts / config.rows) + 1)) fail('double remainder must be top and bottom');
+  for (let i = 0; i < config.rows; i++) {
+    const expected = Math.floor(config.totalBolts / config.rows) + (i < remainder ? 1 : 0);
+    if (config.rowSizes[i] !== expected) fail('row size mismatch');
+  }
   if (tutorial) {
     if (config.totalBolts !== tutorial.totalBolts || config.capacity !== tutorial.capacity || config.colors !== tutorial.colors || config.duplicateStacks !== tutorial.duplicateStacks || config.hiddenActiveCount !== tutorial.hiddenActiveCount) fail('tutorial target mismatch');
     if (config.level === 2 && config.colorIds.some(id => TUTORIAL_CONFIGS[1].colorIds.includes(id))) fail('level 2 palette must be disjoint from level 1');
@@ -1266,7 +1257,7 @@ function NutBoltGame() {
   // Same helpers the level generator uses for its reveal-row split, so
   // rendering and generation always agree on row shape (see ROW LAYOUT
   // HELPERS, above the level config generator).
-  const targetRows = getTargetRowCount(totalBolts);
+  const targetRows = getTargetRowCount(totalBolts, cap);
   const rowSizes = computeRowSizes(totalBolts, targetRows);
   const columns = Math.max(...rowSizes);
   const safeCapacity = Math.max(1, cap);
