@@ -1245,15 +1245,15 @@ function NutBoltGame() {
   // spreads out instead of bunching against one edge.
   // ----------------------------------------------------------
   const BOARD_PADDING = 12;
-  const MIN_ROW_GAP = 8;
-  const MAX_ROW_GAP = 24;
-  const MIN_COL_GAP = 6;
-  const MAX_COL_GAP = 20;
-  const MIN_BOLT_W = 24;
-  const MAX_BOLT_W = 68;
-  const DESIRED_COL_GAP = 14;
-  const MIN_NUT_H = 10;
-  const MAX_NUT_H = 70; 
+  const MIN_ROW_GAP = 12;
+  const MAX_ROW_GAP = 32;
+  const MIN_COL_GAP = 10;
+  const MAX_COL_GAP = 36;
+  const MIN_BOLT_W = 28;
+  const MAX_BOLT_W = 86;
+  const DESIRED_COL_GAP = 20;
+  const MIN_NUT_H = 12;
+  const MAX_NUT_H = 80; 
 
   // Fallback guards for initial render frames on mobile screens
   const safeWidth = Math.max(280, boardSize.width || (typeof window !== 'undefined' ? window.innerWidth : 350));
@@ -1414,7 +1414,7 @@ function NutBoltGame() {
                 <div 
                   key={`bolt-${globalIdx}`} 
                   onClick={() => handleBoltClick(globalIdx)} 
-                  className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform px-3 -mx-3 ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
+                  className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
                 >
                   {/* Slot guide lines (empty slot indicators) */}
