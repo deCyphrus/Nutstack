@@ -59,7 +59,7 @@ const NUT_TYPES = [
   { id: 'white',      bg: 'bg-white',      border: 'border-zinc-400',   icon: Square,   iconText: 'text-zinc-950' },
   { id: 'grey',       bg: 'bg-zinc-600',   border: 'border-zinc-900',   icon: Snowflake,iconText: 'text-white' },
   { id: 'brown',      bg: 'bg-amber-800',  border: 'border-amber-950',  icon: Zap,      iconText: 'text-white' },
-  { id: 'hot-pink',   bg: 'bg-pink-500',   border: 'border-pink-800',   icon: Anchor,   iconText: 'text-zinc-950' },
+  { id: 'hot-pink',   bg: 'bg-pink-400',   border: 'border-pink-700',   icon: Anchor,   iconText: 'text-white' },
   { id: 'green',      bg: 'bg-green-600',  border: 'border-green-900',  icon: Hexagon,  iconText: 'text-white' },
   { id: 'orange',     bg: 'bg-orange-500', border: 'border-orange-800', icon: Triangle, iconText: 'text-zinc-950' },
   { id: 'purple',     bg: 'bg-purple-700', border: 'border-purple-950', icon: Moon,     iconText: 'text-white' },
@@ -130,7 +130,7 @@ const MAX_COLORS = 30; // matches the fixed NUT_TYPES catalogue
 const TUTORIAL_CONFIGS = {
   1: { totalBolts: 5, capacity: 3, colors: 3, duplicateStacks: 0, hiddenActiveCount: 0, colorIds: ['red', 'yellow', 'blue'] },
   2: { totalBolts: 6, capacity: 4, colors: 4, duplicateStacks: 0, hiddenActiveCount: 0, colorIds: ['green', 'orange', 'purple', 'white'] },
-  3: { totalBolts: 6, capacity: 6, colors: 4, duplicateStacks: 0, hiddenActiveCount: 0, colorIds: ['grey', 'brown', 'beige', 'light-blue'] },
+  3: { totalBolts: 6, capacity: 6, colors: 4, duplicateStacks: 0, hiddenActiveCount: 0, colorIds: ['grey', 'brown', 'hot-pink', 'red'] },
   4: { totalBolts: 8, capacity: 3, colors: 4, duplicateStacks: 2, hiddenActiveCount: 0, colorIds: ['red', 'yellow', 'green', 'purple'] },
   5: { totalBolts: 6, capacity: 3, colors: 4, duplicateStacks: 0, hiddenActiveCount: 2, colorIds: ['blue', 'orange', 'white', 'grey'] },
 };
@@ -182,13 +182,7 @@ function choosePaletteIds(level, colors, tutorialIds) {
   
   const baseIds = ['red', 'yellow', 'blue', 'white', 'grey', 'brown', 'hot-pink', 'green', 'orange', 'purple'];
   
-  if (colors <= 10) {
-    return seededAdvancedShuffle(baseIds, level * 101 + 17, 2).slice(0, colors);
-  }
-  
-  let chosen = [...baseIds];
-  let needed = colors - 10;
-  
+  // List of possible variations to swap in instead of a base color
   const replaceable = [
     { base: 'red', variants: ['light-red', 'dark-red'] },
     { base: 'blue', variants: ['light-blue', 'dark-blue'] },
@@ -199,23 +193,72 @@ function choosePaletteIds(level, colors, tutorialIds) {
     { base: 'purple', variants: ['light-violet', 'dark-violet'] }
   ];
   
-  const shuffledReplaceable = seededAdvancedShuffle(replaceable, level * 149 + 29, 2);
+  // Extra pair if we need more than 24 colors
+  const extraPair = ['light-teal', 'dark-teal'];
   
-  let replaceIndex = 0;
-  while (needed > 0 && replaceIndex < shuffledReplaceable.length) {
-    const { base, variants } = shuffledReplaceable[replaceIndex];
-    chosen = chosen.filter(id => id !== base);
-    chosen.push(variants[0], variants[1]);
-    needed--;
-    replaceIndex++;
+  const pool = [...baseIds];
+  
+  if (colors > 10) {
+    let variantsNeeded = colors - 10;
+    const shuffledReplaceable = seededAdvancedShuffle(replaceable, level * 149 + 29, 2);
+    let replaceIndex = 0;
+    
+    // Replace base colors with their light/dark variants (adds +1 color per replacement)
+    while (variantsNeeded > 0 && replaceIndex < shuffledReplaceable.length) {
+      const { base, variants } = shuffledReplaceable[replaceIndex];
+      const baseIdx = pool.indexOf(base);
+      if (baseIdx !== -1) {
+        pool.splice(baseIdx, 1, ...variants);
+        variantsNeeded--;
+      }
+      replaceIndex++;
+    }
+    
+    if (variantsNeeded > 0) {
+       pool.push(...extraPair);
+    }
   }
   
-  if (needed > 0) {
-    chosen.push('light-teal', 'dark-teal');
-    needed -= 2;
+  // We have a pool of colors (which contains no direct light/dark variants of the *same* base if the base is present).
+  // But we still want to avoid conflicts between different bases, like brown vs dark-orange.
+  const conflicts = {
+    'brown': ['dark-orange', 'dark-red'],
+    'yellow': ['light-orange', 'light-green'],
+    'white': ['light-grey'],
+    'grey': ['dark-grey'],
+    'dark-orange': ['brown', 'dark-red'],
+    'light-orange': ['yellow'],
+    'light-grey': ['white'],
+    'dark-red': ['brown', 'dark-orange'],
+    'light-green': ['yellow']
+  };
+
+  const shuffledPool = seededAdvancedShuffle(pool, level * 151 + 31, 2);
+  const chosen = [];
+  
+  for (const id of shuffledPool) {
+    if (chosen.length >= colors) break;
+    
+    // Check if this id conflicts with anything already in chosen
+    const idConflicts = conflicts[id] || [];
+    const hasConflict = chosen.some(c => idConflicts.includes(c));
+    
+    if (!hasConflict) {
+      chosen.push(id);
+    }
   }
   
-  return seededAdvancedShuffle(chosen, level * 151 + 31, 2).slice(0, colors);
+  // If we couldn't find enough non-conflicting colors, just fill the rest ignoring conflicts
+  if (chosen.length < colors) {
+    for (const id of shuffledPool) {
+      if (chosen.length >= colors) break;
+      if (!chosen.includes(id)) {
+        chosen.push(id);
+      }
+    }
+  }
+  
+  return chosen;
 }
 
 function getNormalCapacity(level, previousCapacity, isDuplicate) {
@@ -377,6 +420,8 @@ function NutBoltGame() {
   const [level, setLevel] = useState(1);
   const [bolts, setBolts] = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(null);
+  const [errorIdx, setErrorIdx] = useState(null);
+  const [justLockedIdx, setJustLockedIdx] = useState(null);
   const [history, setHistory] = useState([]);
   const [moveCount, setMoveCount] = useState(0);
   const [undoCount, setUndoCount] = useState(0);
@@ -668,7 +713,7 @@ function NutBoltGame() {
         isRevealPeg: false,
       }));
 
-      const scrambleMoves = Math.max(150, Math.round(totalNuts * 6));
+      const scrambleMoves = Math.max(300, Math.round(totalNuts * 15));
 
       // Phase 1: Random Reverse Scramble
       for (let i = 0; i < scrambleMoves; i++) {
@@ -685,7 +730,27 @@ function NutBoltGame() {
         const validTargets = [];
         for (let j = 0; j < bolts.length; j++) {
           if (j !== sourceIdx && bolts[j].nuts.length < capacity) {
-            validTargets.push(j);
+            const movingNut = bolts[sourceIdx].nuts[bolts[sourceIdx].nuts.length - 1];
+            const targetNuts = bolts[j].nuts;
+            let run = 1;
+            if (targetNuts.length > 0 && targetNuts[targetNuts.length - 1].id === movingNut.id) {
+               run = 2;
+               if (targetNuts.length > 1 && targetNuts[targetNuts.length - 2].id === movingNut.id) {
+                 run = 3;
+               }
+            }
+            if (run < 3) {
+              validTargets.push(j);
+            }
+          }
+        }
+        
+        if (validTargets.length === 0) {
+          // Fallback if strictly preventing chains of 3 leaves no valid targets
+          for (let j = 0; j < bolts.length; j++) {
+            if (j !== sourceIdx && bolts[j].nuts.length < capacity) {
+              validTargets.push(j);
+            }
           }
         }
 
@@ -734,6 +799,30 @@ function NutBoltGame() {
         if (a.nuts.length > 0 && b.nuts.length === 0) return -1;
         return 0;
       });
+
+      // Phase 3: Chain-breaking post-processing
+      // Strictly prevent stacks of 3 or more of the same color
+      for (let b = 0; b < bolts.length; b++) {
+        const nutList = bolts[b].nuts;
+        for (let i = 0; i < nutList.length - 2; i++) {
+          if (nutList[i].id === nutList[i + 1].id && nutList[i].id === nutList[i + 2].id) {
+            // Found a chain of 3+, try to swap the middle nut
+            let swapped = false;
+            for (let tb = 0; tb < bolts.length && !swapped; tb++) {
+              for (let tn = 0; tn < bolts[tb].nuts.length && !swapped; tn++) {
+                const targetNut = bolts[tb].nuts[tn];
+                if (targetNut.id !== nutList[i].id) {
+                  // Swap
+                  const temp = nutList[i + 1].id;
+                  nutList[i + 1].id = targetNut.id;
+                  bolts[tb].nuts[tn].id = temp;
+                  swapped = true;
+                }
+              }
+            }
+          }
+        }
+      }
 
       return bolts;
     };
@@ -934,12 +1023,16 @@ function NutBoltGame() {
       const targetPeg = bolts[idx];
 
       if (targetPeg.nuts.length >= currentConfig.capacity || checkBoltLock(targetPeg.nuts)) {
+        setErrorIdx(idx);
+        setTimeout(() => setErrorIdx(null), 400);
         setSelectedIdx(null);
         return;
       }
 
       const topNut = sourcePeg.nuts[sourcePeg.nuts.length - 1];
       if (targetPeg.nuts.length > 0 && targetPeg.nuts[targetPeg.nuts.length - 1].id !== topNut.id) {
+        setErrorIdx(idx);
+        setTimeout(() => setErrorIdx(null), 400);
         setSelectedIdx(null);
         return;
       }
@@ -983,6 +1076,12 @@ function NutBoltGame() {
       setBolts(updatedBolts);
       setSelectedIdx(null);
       setMoveCount(prev => prev + 1);
+      
+      const targetUpdatedNuts = updatedBolts[idx].nuts;
+      if (targetUpdatedNuts.length === currentConfig.capacity && targetUpdatedNuts.every(n => n.id === targetUpdatedNuts[0].id)) {
+        setJustLockedIdx(idx);
+        setTimeout(() => setJustLockedIdx(null), 800);
+      }
     }
   };
   // ----------------------------------------------------------
@@ -1151,10 +1250,10 @@ function NutBoltGame() {
   const MIN_COL_GAP = 6;
   const MAX_COL_GAP = 20;
   const MIN_BOLT_W = 24;
-  const MAX_BOLT_W = 56;
+  const MAX_BOLT_W = 68;
   const DESIRED_COL_GAP = 14;
   const MIN_NUT_H = 10;
-  const MAX_NUT_H = 50; 
+  const MAX_NUT_H = 70; 
 
   // Fallback guards for initial render frames on mobile screens
   const safeWidth = Math.max(280, boardSize.width || (typeof window !== 'undefined' ? window.innerWidth : 350));
@@ -1181,13 +1280,6 @@ function NutBoltGame() {
   const reservedRowGapH = targetRows > 1 ? MIN_ROW_GAP * (targetRows - 1) : 0;
   const availHForPegs = Math.max(100, availH - reservedRowGapH);
 
-  const nutHeight = Math.max(MIN_NUT_H, Math.min(MAX_NUT_H, availHForPegs / ((safeCapacity + 1.2) * targetRows)));
-  const pegHeight = Math.max(20, nutHeight * safeCapacity + 8);
-
-  const rowGap = targetRows > 1
-    ? Math.max(MIN_ROW_GAP, Math.min(MAX_ROW_GAP, (availH - pegHeight * targetRows) / (targetRows - 1)))
-    : 0;
-
   // Solve bolt width + column gap together so a row always fits exactly:
   // start from the desired gap, shrink the gap first if bolts would go
   // below minimum width, then only shrink bolt width as a last resort.
@@ -1210,6 +1302,15 @@ function NutBoltGame() {
 
   boltColWidth = Math.max(MIN_BOLT_W, Math.min(MAX_BOLT_W, boltColWidth));
   colGap = Math.max(MIN_COL_GAP, Math.min(MAX_COL_GAP, colGap));
+
+  // Calculate nutHeight bounded by boltColWidth to prevent abnormally tall thin nuts
+  let nutHeight = Math.max(MIN_NUT_H, Math.min(MAX_NUT_H, availHForPegs / ((safeCapacity + 1.2) * targetRows)));
+  nutHeight = Math.min(nutHeight, boltColWidth);
+  const pegHeight = Math.max(20, nutHeight * safeCapacity + 8);
+
+  const rowGap = targetRows > 1
+    ? Math.max(MIN_ROW_GAP, Math.min(MAX_ROW_GAP, (availH - pegHeight * targetRows) / (targetRows - 1)))
+    : 0;
 
   // Chunk bolts into rows while preserving true state array indices
   const chunkedBolts = [];
@@ -1239,6 +1340,25 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   return (
     <div className="fixed inset-0 bg-black text-slate-100 flex flex-col overflow-hidden overscroll-none select-none">
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes custom-shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-4px) rotate(-2deg); }
+          50% { transform: translateX(4px) rotate(2deg); }
+          75% { transform: translateX(-4px) rotate(-2deg); }
+        }
+        @keyframes custom-burst {
+          0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+          50% { box-shadow: 0 0 20px 10px rgba(245, 158, 11, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+        .animate-error-shake {
+          animation: custom-shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+        .animate-lock-burst {
+          animation: custom-burst 0.6s ease-out both;
+        }
+      `}} />
 
       {/* ======================================================
           HEADER BAR
@@ -1294,7 +1414,7 @@ function NutBoltGame() {
                 <div 
                   key={`bolt-${globalIdx}`} 
                   onClick={() => handleBoltClick(globalIdx)} 
-                  className="relative flex flex-col items-center cursor-pointer group select-none transition-transform p-1 -m-1"
+                  className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform px-3 -mx-3 ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
                 >
                   {/* Slot guide lines (empty slot indicators) */}
@@ -1305,7 +1425,7 @@ function NutBoltGame() {
                   </div>
                   
                   {/* Peg rod */}
-                  <div className={`absolute bottom-1 w-1 rounded-t-full transition-colors ${isLocked ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : isSelected ? 'bg-blue-400 animate-pulse' : 'bg-slate-800 group-hover:bg-slate-700'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px` }} />
+                  <div className={`absolute bottom-1 w-1 rounded-t-full transition-all ${isLocked ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : isSelected ? 'bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse' : 'bg-slate-800 group-hover:bg-slate-700'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px` }} />
                   
                   {/* Nut stack */}
                   <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center gap-y-[3px] z-10 pointer-events-none">
@@ -1318,7 +1438,7 @@ function NutBoltGame() {
                       return (
                         <div 
                           key={nIdx} 
-                          className={`rounded flex flex-col items-center justify-center border-b-2 shadow-sm transform transition-all w-full ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'} ${isSelected && isTopNut ? '-translate-y-2 ring-2 ring-white scale-105 z-20 shadow-xl' : ''}`}
+                          className={`rounded flex flex-col items-center justify-center border-b-2 shadow-sm transform transition-all w-full ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'} ${isSelected && isTopNut ? '-translate-y-3 ring-4 ring-blue-400 ring-offset-1 ring-offset-black scale-110 z-20 shadow-[0_10px_20px_rgba(0,0,0,0.5)]' : ''}`}
                           style={{ height: `${Math.max(1, nutHeight - 3)}px` }}
                         >
                           {isNutRevealed ? (
@@ -1332,7 +1452,7 @@ function NutBoltGame() {
                     {/* Lock cap shown when bolt is fully sorted */}
                     {isLocked && (
                       <div
-                        className="rounded-full bg-gradient-to-b from-yellow-200 via-amber-400 to-amber-600 border border-amber-700 shadow-md"
+                        className={`rounded-full bg-gradient-to-b from-yellow-200 via-amber-400 to-amber-600 border border-amber-700 shadow-md z-20 ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                         style={{ width: '65%', height: `${Math.max(4, Math.min(12, nutHeight * 0.3))}px` }}
                       />
                     )}
