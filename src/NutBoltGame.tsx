@@ -6,9 +6,9 @@ import {
   Trophy, Undo2, RotateCcw, Lock, Settings, X,
   Circle, Square, Triangle, Hexagon, Star, Heart, 
   Moon, Sun, Cloud, Snowflake, Crown, Music, 
-  Zap, Camera, ChevronLeft, ChevronRight, Diamond, Gem,
+  Zap, ChevronLeft, ChevronRight, Diamond, Gem,
   Flower2, Leaf, Flame, Waves, Mountain, Umbrella, Apple,
-  Anchor, Bell, Coffee, Cookie, Flag, Ghost, Key
+  Anchor, Bell, Cookie, Ghost
 } from 'lucide-react';
 // ============================================================
 // END SECTION: IMPORTS
@@ -57,9 +57,9 @@ const NUT_TYPES = [
   { id: 'yellow',     bg: 'bg-yellow-300', border: 'border-yellow-600', icon: Sun,      iconText: 'text-zinc-950' },
   { id: 'blue',       bg: 'bg-blue-700',   border: 'border-blue-950',   icon: Circle,   iconText: 'text-white' },
   { id: 'white',      bg: 'bg-white',      border: 'border-zinc-400',   icon: Square,   iconText: 'text-zinc-950' },
-  { id: 'grey',       bg: 'bg-zinc-500',   border: 'border-zinc-800',   icon: Snowflake,iconText: 'text-white' },
+  { id: 'grey',       bg: 'bg-zinc-600',   border: 'border-zinc-900',   icon: Snowflake,iconText: 'text-white' },
   { id: 'brown',      bg: 'bg-amber-800',  border: 'border-amber-950',  icon: Zap,      iconText: 'text-white' },
-  { id: 'beige',      bg: 'bg-amber-200',  border: 'border-amber-500',  icon: Camera,   iconText: 'text-zinc-950' },
+  { id: 'hot-pink',   bg: 'bg-pink-500',   border: 'border-pink-800',   icon: Anchor,   iconText: 'text-zinc-950' },
   { id: 'green',      bg: 'bg-green-600',  border: 'border-green-900',  icon: Hexagon,  iconText: 'text-white' },
   { id: 'orange',     bg: 'bg-orange-500', border: 'border-orange-800', icon: Triangle, iconText: 'text-zinc-950' },
   { id: 'purple',     bg: 'bg-purple-700', border: 'border-purple-950', icon: Moon,     iconText: 'text-white' },
@@ -79,10 +79,6 @@ const NUT_TYPES = [
   { id: 'dark-orange', bg: 'bg-orange-800',border: 'border-orange-950', icon: Mountain, iconText: 'text-white' },
   { id: 'light-violet',bg: 'bg-violet-300',border: 'border-violet-600', icon: Cookie,   iconText: 'text-zinc-950' },
   { id: 'dark-violet', bg: 'bg-violet-900',border: 'border-violet-950', icon: Ghost,    iconText: 'text-white' },
-  { id: 'cyan',        bg: 'bg-cyan-500',  border: 'border-cyan-800',   icon: Anchor,   iconText: 'text-zinc-950' },
-  { id: 'navy',        bg: 'bg-sky-950',   border: 'border-black',      icon: Key,      iconText: 'text-white' },
-  { id: 'gold',        bg: 'bg-amber-500', border: 'border-amber-800',  icon: Flag,     iconText: 'text-zinc-950' },
-  { id: 'coral',       bg: 'bg-red-400',   border: 'border-red-700',    icon: Coffee,   iconText: 'text-zinc-950' },
 ];
 // ============================================================
 // END SECTION: NUT COLOR / ICON PALETTE (NUT_TYPES)
@@ -183,13 +179,43 @@ function getRevealCapacityForLevel(level) {
 
 function choosePaletteIds(level, colors, tutorialIds) {
   if (tutorialIds) return tutorialIds;
-  const baseIds = NUT_TYPES.slice(0, 10).map(type => type.id);
-  const variantIds = NUT_TYPES.slice(10).map(type => type.id);
-  const ordered = [
-    ...seededAdvancedShuffle(baseIds, level * 101 + 17, 2),
-    ...seededAdvancedShuffle(variantIds, level * 149 + 29, 2),
+  
+  const baseIds = ['red', 'yellow', 'blue', 'white', 'grey', 'brown', 'hot-pink', 'green', 'orange', 'purple'];
+  
+  if (colors <= 10) {
+    return seededAdvancedShuffle(baseIds, level * 101 + 17, 2).slice(0, colors);
+  }
+  
+  let chosen = [...baseIds];
+  let needed = colors - 10;
+  
+  const replaceable = [
+    { base: 'red', variants: ['light-red', 'dark-red'] },
+    { base: 'blue', variants: ['light-blue', 'dark-blue'] },
+    { base: 'green', variants: ['light-green', 'dark-green'] },
+    { base: 'grey', variants: ['light-grey', 'dark-grey'] },
+    { base: 'orange', variants: ['light-orange', 'dark-orange'] },
+    { base: 'hot-pink', variants: ['light-pink', 'dark-pink'] },
+    { base: 'purple', variants: ['light-violet', 'dark-violet'] }
   ];
-  return ordered.slice(0, colors);
+  
+  const shuffledReplaceable = seededAdvancedShuffle(replaceable, level * 149 + 29, 2);
+  
+  let replaceIndex = 0;
+  while (needed > 0 && replaceIndex < shuffledReplaceable.length) {
+    const { base, variants } = shuffledReplaceable[replaceIndex];
+    chosen = chosen.filter(id => id !== base);
+    chosen.push(variants[0], variants[1]);
+    needed--;
+    replaceIndex++;
+  }
+  
+  if (needed > 0) {
+    chosen.push('light-teal', 'dark-teal');
+    needed -= 2;
+  }
+  
+  return seededAdvancedShuffle(chosen, level * 151 + 31, 2).slice(0, colors);
 }
 
 function getNormalCapacity(level, previousCapacity, isDuplicate) {
@@ -631,85 +657,145 @@ function NutBoltGame() {
   // a known four-move recovery sequence, so solutionMoveUpperBound is real.
   // ----------------------------------------------------------
   const applyReverseShuffling = (initialBolts, capacity, seed) => {
-    let currentSeed = seed;
-    
-    // Clone bolts
-    const bolts = initialBolts.map(bolt => ({
-      nuts: bolt.nuts.map(nut => ({ ...nut })),
-      isRevealPeg: false,
-    }));
-    
-    const activeBolts = bolts.filter(b => b.nuts.length > 0).length;
-    const targetEmptyCount = bolts.length - activeBolts;
-    const totalNuts = activeBolts * capacity;
-    const scrambleMoves = Math.max(30, Math.round(totalNuts * 1.5));
-    
-    // Phase 1: Random Reverse Scramble
-    // Any bolt with nuts can be a source; any other bolt with space can be a target.
-    for (let i = 0; i < scrambleMoves; i++) {
-      const validSources = [];
-      for (let j = 0; j < bolts.length; j++) {
-        if (bolts[j].nuts.length > 0) {
-          validSources.push(j);
+    const activeBoltsCount = initialBolts.filter(b => b.nuts.length > 0).length;
+    const targetEmptyCount = initialBolts.length - activeBoltsCount;
+    const totalNuts = activeBoltsCount * capacity;
+
+    const runSingleScramble = (currentSeed) => {
+      let lSeed = currentSeed;
+      const bolts = initialBolts.map(bolt => ({
+        nuts: bolt.nuts.map(nut => ({ ...nut })),
+        isRevealPeg: false,
+      }));
+
+      const scrambleMoves = Math.max(150, Math.round(totalNuts * 6));
+
+      // Phase 1: Random Reverse Scramble
+      for (let i = 0; i < scrambleMoves; i++) {
+        const validSources = [];
+        for (let j = 0; j < bolts.length; j++) {
+          if (bolts[j].nuts.length > 0) {
+            validSources.push(j);
+          }
+        }
+        if (validSources.length === 0) break;
+
+        const sourceIdx = validSources[Math.floor(seededRandom(lSeed++) * validSources.length)];
+
+        const validTargets = [];
+        for (let j = 0; j < bolts.length; j++) {
+          if (j !== sourceIdx && bolts[j].nuts.length < capacity) {
+            validTargets.push(j);
+          }
+        }
+
+        if (validTargets.length > 0) {
+          const targetIdx = validTargets[Math.floor(seededRandom(lSeed++) * validTargets.length)];
+          bolts[targetIdx].nuts.push(bolts[sourceIdx].nuts.pop());
         }
       }
-      if (validSources.length === 0) break;
-      
-      const sourceIdx = validSources[Math.floor(seededRandom(currentSeed++) * validSources.length)];
-      
-      const validTargets = [];
-      for (let j = 0; j < bolts.length; j++) {
-        if (j !== sourceIdx && bolts[j].nuts.length < capacity) {
-          validTargets.push(j);
+
+      // Phase 2: Consolidation to full active bolts and target empty bolts
+      let consolidationSteps = 0;
+      const maxConsolidationSteps = 500;
+
+      while (consolidationSteps < maxConsolidationSteps) {
+        const currentEmptyCount = bolts.filter(b => b.nuts.length === 0).length;
+        if (currentEmptyCount === targetEmptyCount) {
+          break;
         }
-      }
-      
-      if (validTargets.length > 0) {
-        const targetIdx = validTargets[Math.floor(seededRandom(currentSeed++) * validTargets.length)];
+
+        const partialBolts = [];
+        for (let j = 0; j < bolts.length; j++) {
+          if (bolts[j].nuts.length > 0 && bolts[j].nuts.length < capacity) {
+            partialBolts.push(j);
+          }
+        }
+
+        if (partialBolts.length < 2) {
+          break;
+        }
+
+        // Shuffle partial bolts order slightly using seed to avoid bias
+        const p1 = Math.floor(seededRandom(lSeed++) * partialBolts.length);
+        let p2 = Math.floor(seededRandom(lSeed++) * partialBolts.length);
+        if (p1 === p2) p2 = (p1 + 1) % partialBolts.length;
+
+        const sourceIdx = bolts[partialBolts[p1]].nuts.length < bolts[partialBolts[p2]].nuts.length ? partialBolts[p1] : partialBolts[p2];
+        const targetIdx = sourceIdx === partialBolts[p1] ? partialBolts[p2] : partialBolts[p1];
+
         bolts[targetIdx].nuts.push(bolts[sourceIdx].nuts.pop());
+        consolidationSteps++;
       }
-    }
-    
-    // Phase 2: Consolidation
-    // Consolidate nuts into full bolts until exactly targetEmptyCount bolts are 100% empty (and remaining are 100% full)
-    let consolidationSteps = 0;
-    const maxConsolidationSteps = 500;
-    
-    while (consolidationSteps < maxConsolidationSteps) {
-      const currentEmptyCount = bolts.filter(b => b.nuts.length === 0).length;
-      if (currentEmptyCount === targetEmptyCount) {
-        break;
-      }
-      
-      const partialBolts = [];
-      for (let j = 0; j < bolts.length; j++) {
-        if (bolts[j].nuts.length > 0 && bolts[j].nuts.length < capacity) {
-          partialBolts.push(j);
+
+      // Sort bolts so completely empty bolts are at the end
+      bolts.sort((a, b) => {
+        if (a.nuts.length === 0 && b.nuts.length > 0) return 1;
+        if (a.nuts.length > 0 && b.nuts.length === 0) return -1;
+        return 0;
+      });
+
+      return bolts;
+    };
+
+    // Quality Scoring Function
+    // Lower score is better (fewer matching adjacent nuts, lower color concentration per bolt)
+    const evaluateQuality = (candidateBolts) => {
+      let score = 0;
+
+      for (const bolt of candidateBolts) {
+        if (bolt.nuts.length === 0) continue;
+
+        // Count color frequencies in this bolt
+        const colorCounts = {};
+        let runLength = 1;
+        for (let i = 0; i < bolt.nuts.length; i++) {
+          const colorId = bolt.nuts[i].id;
+          colorCounts[colorId] = (colorCounts[colorId] || 0) + 1;
+
+          // Penalty for adjacent same colors
+          if (i > 0) {
+            if (bolt.nuts[i].id === bolt.nuts[i - 1].id) {
+              runLength++;
+              if (runLength >= 3) {
+                score += 1000;
+              } else {
+                score += 20;
+              }
+            } else {
+              runLength = 1;
+            }
+          }
+        }
+
+        // Penalty if any single color dominates this bolt
+        for (const c in colorCounts) {
+          if (colorCounts[c] >= 3) {
+            score += 300 * (colorCounts[c] - 2); // Heavy penalty for 3 or 4 of same color in one bolt
+          }
         }
       }
-      
-      if (partialBolts.length < 2) {
-        break;
+
+      return score;
+    };
+
+    // Try multiple shuffle candidates and pick the best mixed result
+    let bestCandidate = null;
+    let bestScore = Infinity;
+
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const candidateSeed = seed + attempt * 997;
+      const candidateBolts = runSingleScramble(candidateSeed);
+      const score = evaluateQuality(candidateBolts);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestCandidate = candidateBolts;
+        if (score === 0) break; // Perfect shuffle achieved
       }
-      
-      // Sort partial bolts by length ascending
-      partialBolts.sort((a, b) => bolts[a].nuts.length - bolts[b].nuts.length);
-      
-      const sourceIdx = partialBolts[0];
-      const targetIdx = partialBolts[partialBolts.length - 1];
-      
-      bolts[targetIdx].nuts.push(bolts[sourceIdx].nuts.pop());
-      consolidationSteps++;
     }
-    
-    // Sort bolts so completely empty bolts are at the end for visual consistency
-    bolts.sort((a, b) => {
-      if (a.nuts.length === 0 && b.nuts.length > 0) return 1;
-      if (a.nuts.length > 0 && b.nuts.length === 0) return -1;
-      return 0;
-    });
-    
-    return bolts;
+
+    return bestCandidate || runSingleScramble(seed);
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: REVERSE SHUFFLE SIMULATOR
