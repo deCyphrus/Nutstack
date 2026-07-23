@@ -10,6 +10,7 @@ import {
   Flower2, Leaf, Flame, Waves, Mountain, Umbrella, Apple,
   Anchor, Bell, Cookie, Ghost
 } from 'lucide-react';
+import { supabase, isGlobalLeaderboardEnabled } from './lib/supabaseClient';
 // ============================================================
 // END SECTION: IMPORTS
 // ============================================================
@@ -47,41 +48,93 @@ function seededAdvancedShuffle(array, seed, intensityPasses = 3) {
 
 // ============================================================
 // SECTION: NUT COLOR / ICON PALETTE (NUT_TYPES)
-// Exactly 30 selectable colour-and-shape identities. The first ten are
-// deliberately high-contrast base colours for low-colour levels; the rest
-// are light/dark variants reserved for larger or occasionally harder sets.
-// `iconText` is explicit so every icon remains readable on its own nut.
+// 26 selectable colour-and-shape identities. Each carries a real hex
+// swatch (matching its Tailwind class) so palette selection downstream
+// can measure actual visual distance between colours instead of relying
+// on a hand-maintained "these two look the same" list. `iconText` is
+// explicit so every icon remains readable on its own nut.
 // ============================================================
 const NUT_TYPES = [
-  { id: 'red',        bg: 'bg-red-600',    border: 'border-red-900',    icon: Star,     iconText: 'text-white' },
-  { id: 'yellow',     bg: 'bg-yellow-300', border: 'border-yellow-600', icon: Sun,      iconText: 'text-zinc-950' },
-  { id: 'blue',       bg: 'bg-blue-700',   border: 'border-blue-950',   icon: Circle,   iconText: 'text-white' },
-  { id: 'white',      bg: 'bg-white',      border: 'border-zinc-400',   icon: Square,   iconText: 'text-zinc-950' },
-  { id: 'grey',       bg: 'bg-zinc-600',   border: 'border-zinc-900',   icon: Snowflake,iconText: 'text-white' },
-  { id: 'brown',      bg: 'bg-amber-800',  border: 'border-amber-950',  icon: Zap,      iconText: 'text-white' },
-  { id: 'hot-pink',   bg: 'bg-pink-400',   border: 'border-pink-700',   icon: Anchor,   iconText: 'text-white' },
-  { id: 'green',      bg: 'bg-green-600',  border: 'border-green-900',  icon: Hexagon,  iconText: 'text-white' },
-  { id: 'orange',     bg: 'bg-orange-500', border: 'border-orange-800', icon: Triangle, iconText: 'text-zinc-950' },
-  { id: 'purple',     bg: 'bg-purple-700', border: 'border-purple-950', icon: Moon,     iconText: 'text-white' },
-  { id: 'light-blue', bg: 'bg-sky-300',    border: 'border-sky-600',    icon: Cloud,    iconText: 'text-zinc-950' },
-  { id: 'dark-blue',  bg: 'bg-indigo-900', border: 'border-indigo-950', icon: Crown,    iconText: 'text-white' },
-  { id: 'light-green',bg: 'bg-lime-300',   border: 'border-lime-600',   icon: Leaf,     iconText: 'text-zinc-950' },
-  { id: 'dark-green', bg: 'bg-emerald-800',border: 'border-emerald-950',icon: Flower2,  iconText: 'text-white' },
-  { id: 'light-grey', bg: 'bg-slate-300',  border: 'border-slate-500',  icon: Diamond,  iconText: 'text-zinc-950' },
-  { id: 'dark-grey',  bg: 'bg-slate-700',  border: 'border-slate-950',  icon: Gem,      iconText: 'text-white' },
-  { id: 'light-red',  bg: 'bg-rose-300',   border: 'border-rose-600',   icon: Heart,    iconText: 'text-zinc-950' },
-  { id: 'dark-red',   bg: 'bg-rose-900',   border: 'border-rose-950',   icon: Flame,    iconText: 'text-white' },
-  { id: 'light-teal', bg: 'bg-teal-300',   border: 'border-teal-600',   icon: Waves,    iconText: 'text-zinc-950' },
-  { id: 'dark-teal',  bg: 'bg-teal-800',   border: 'border-teal-950',   icon: Music,    iconText: 'text-white' },
-  { id: 'light-pink', bg: 'bg-pink-300',   border: 'border-pink-600',   icon: Umbrella, iconText: 'text-zinc-950' },
-  { id: 'dark-pink',  bg: 'bg-pink-800',   border: 'border-pink-950',   icon: Bell,     iconText: 'text-white' },
-  { id: 'light-orange',bg: 'bg-orange-300',border: 'border-orange-600', icon: Apple,    iconText: 'text-zinc-950' },
-  { id: 'dark-orange', bg: 'bg-orange-800',border: 'border-orange-950', icon: Mountain, iconText: 'text-white' },
-  { id: 'light-violet',bg: 'bg-violet-300',border: 'border-violet-600', icon: Cookie,   iconText: 'text-zinc-950' },
-  { id: 'dark-violet', bg: 'bg-violet-900',border: 'border-violet-950', icon: Ghost,    iconText: 'text-white' },
+  { id: 'red',         bg: 'bg-red-600',     border: 'border-red-900',     hex: '#dc2626', icon: Star,     iconText: 'text-white' },
+  { id: 'yellow',      bg: 'bg-yellow-300',  border: 'border-yellow-600',  hex: '#fde047', icon: Sun,      iconText: 'text-zinc-950' },
+  { id: 'blue',        bg: 'bg-blue-700',    border: 'border-blue-950',    hex: '#1d4ed8', icon: Circle,   iconText: 'text-white' },
+  { id: 'white',       bg: 'bg-white',       border: 'border-zinc-400',    hex: '#ffffff', icon: Square,   iconText: 'text-zinc-950' },
+  { id: 'grey',        bg: 'bg-zinc-600',    border: 'border-zinc-900',    hex: '#52525b', icon: Snowflake,iconText: 'text-white' },
+  { id: 'brown',       bg: 'bg-amber-800',   border: 'border-amber-950',   hex: '#92400e', icon: Zap,      iconText: 'text-white' },
+  { id: 'hot-pink',    bg: 'bg-pink-400',    border: 'border-pink-700',    hex: '#f472b6', icon: Anchor,   iconText: 'text-white' },
+  { id: 'green',       bg: 'bg-green-600',   border: 'border-green-900',   hex: '#16a34a', icon: Hexagon,  iconText: 'text-white' },
+  { id: 'orange',      bg: 'bg-orange-500',  border: 'border-orange-800',  hex: '#f97316', icon: Triangle, iconText: 'text-zinc-950' },
+  { id: 'purple',      bg: 'bg-purple-700',  border: 'border-purple-950',  hex: '#7e22ce', icon: Moon,     iconText: 'text-white' },
+  { id: 'light-blue',  bg: 'bg-sky-300',     border: 'border-sky-600',     hex: '#7dd3fc', icon: Cloud,    iconText: 'text-zinc-950' },
+  { id: 'dark-blue',   bg: 'bg-indigo-900',  border: 'border-indigo-950',  hex: '#312e81', icon: Crown,    iconText: 'text-white' },
+  { id: 'light-green', bg: 'bg-lime-300',    border: 'border-lime-600',    hex: '#bef264', icon: Leaf,     iconText: 'text-zinc-950' },
+  { id: 'dark-green',  bg: 'bg-emerald-800', border: 'border-emerald-950', hex: '#065f46', icon: Flower2,  iconText: 'text-white' },
+  { id: 'light-grey',  bg: 'bg-slate-300',   border: 'border-slate-500',   hex: '#cbd5e1', icon: Diamond,  iconText: 'text-zinc-950' },
+  { id: 'dark-grey',   bg: 'bg-slate-700',   border: 'border-slate-950',   hex: '#334155', icon: Gem,      iconText: 'text-white' },
+  { id: 'light-red',   bg: 'bg-rose-300',    border: 'border-rose-600',    hex: '#fda4af', icon: Heart,    iconText: 'text-zinc-950' },
+  { id: 'dark-red',    bg: 'bg-rose-900',    border: 'border-rose-950',    hex: '#881337', icon: Flame,    iconText: 'text-white' },
+  { id: 'light-teal',  bg: 'bg-teal-300',    border: 'border-teal-600',    hex: '#5eead4', icon: Waves,    iconText: 'text-zinc-950' },
+  { id: 'dark-teal',   bg: 'bg-teal-800',    border: 'border-teal-950',    hex: '#115e59', icon: Music,    iconText: 'text-white' },
+  { id: 'light-pink',  bg: 'bg-pink-300',    border: 'border-pink-600',    hex: '#f9a8d4', icon: Umbrella, iconText: 'text-zinc-950' },
+  { id: 'dark-pink',   bg: 'bg-pink-800',    border: 'border-pink-950',    hex: '#9d174d', icon: Bell,     iconText: 'text-white' },
+  { id: 'light-orange',bg: 'bg-orange-300',  border: 'border-orange-600',  hex: '#fdba74', icon: Apple,    iconText: 'text-zinc-950' },
+  { id: 'dark-orange', bg: 'bg-orange-800',  border: 'border-orange-950',  hex: '#9a3412', icon: Mountain, iconText: 'text-white' },
+  { id: 'light-violet',bg: 'bg-violet-300',  border: 'border-violet-600',  hex: '#c4b5fd', icon: Cookie,   iconText: 'text-zinc-950' },
+  { id: 'dark-violet', bg: 'bg-violet-900',  border: 'border-violet-950',  hex: '#4c1d95', icon: Ghost,    iconText: 'text-white' },
 ];
 // ============================================================
 // END SECTION: NUT COLOR / ICON PALETTE (NUT_TYPES)
+// ============================================================
+
+
+// ============================================================
+// SECTION: COLOUR DISTANCE / CONTRAST ENGINE
+// Replaces the old hand-maintained "these two clash" pair list with a
+// real measurement: convert each swatch to HSL, then score how
+// different two colours actually look — weighting hue (the biggest
+// driver of "these read as the same colour") more than lightness or
+// saturation. A pair "clashes" when the score falls under
+// CLASH_THRESHOLD. This scales to the whole 26-colour catalogue
+// automatically instead of needing every new pair hand-entered.
+// ============================================================
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return { h: h * 60, s, l };
+}
+
+const NUT_HSL = Object.fromEntries(NUT_TYPES.map(t => [t.id, hexToHsl(t.hex)]));
+
+// 0 = identical, larger = more visually distinct. Hue distance is
+// circular (359° and 1° are neighbours) and dominates the score;
+// lightness/saturation add extra separation for same-hue light/dark
+// pairs (e.g. light-red vs dark-red) without letting hue alone decide.
+function colorDistance(idA, idB) {
+  const a = NUT_HSL[idA], b = NUT_HSL[idB];
+  const rawHueDiff = Math.abs(a.h - b.h);
+  const hueDiff = Math.min(rawHueDiff, 360 - rawHueDiff);
+  const lightDiff = Math.abs(a.l - b.l) * 100;
+  const satDiff = Math.abs(a.s - b.s) * 60;
+  return hueDiff + lightDiff * 0.5 + satDiff * 0.3;
+}
+
+const CLASH_THRESHOLD = 26; // below this, two colours read as "the same" at a glance
+
+function clashesWithAny(id, chosenIds) {
+  return chosenIds.some(c => colorDistance(id, c) < CLASH_THRESHOLD);
+}
+// ============================================================
+// END SECTION: COLOUR DISTANCE / CONTRAST ENGINE
 // ============================================================
 
 
@@ -128,7 +181,7 @@ function computeRowSizes(totalBolts, rows) {
 // Pure deterministic rules. A duplicate count is the number of extra
 // complete colour stacks, therefore activeBolts = colours + duplicates.
 // ============================================================
-const MAX_COLORS = 30; // matches the fixed NUT_TYPES catalogue
+const MAX_COLORS = 26; // matches the fixed NUT_TYPES catalogue
 const TUTORIAL_CONFIGS = {
   1: { totalBolts: 5, capacity: 3, colors: 3, duplicateStacks: 0, hiddenActiveCount: 0, colorIds: ['red', 'yellow', 'blue'] },
   2: { totalBolts: 6, capacity: 4, colors: 4, duplicateStacks: 0, hiddenActiveCount: 0, colorIds: ['green', 'orange', 'purple', 'white'] },
@@ -179,74 +232,57 @@ function getRevealCapacityForLevel(level) {
   return base + ((index + position) % 2);
 }
 
+// Small, deliberately rarely-picked colours. Every so often the palette
+// leads with one of these for a bit of visual variety instead of always
+// reaching for the same familiar set — but it only survives if it
+// clears the same clash check as every other colour, so it can never
+// collide with whatever else ends up on the board that level.
+const RARE_ACCENTS = ['dark-teal', 'light-violet', 'dark-pink', 'light-teal', 'dark-violet'];
+const RARE_ACCENT_CHANCE = 1 / 6;
+
 function choosePaletteIds(level, colors, tutorialIds) {
   if (tutorialIds) return tutorialIds;
-  
-  const baseIds = ['red', 'yellow', 'blue', 'white', 'grey', 'brown', 'hot-pink', 'green', 'orange', 'purple'];
-  
-  // List of possible variations to swap in instead of a base color
-  const replaceable = [
-    { base: 'red', variants: ['light-red', 'dark-red'] },
-    { base: 'blue', variants: ['light-blue', 'dark-blue'] },
-    { base: 'green', variants: ['light-green', 'dark-green'] },
-    { base: 'grey', variants: ['light-grey', 'dark-grey'] },
-    { base: 'orange', variants: ['light-orange', 'dark-orange'] },
-    { base: 'hot-pink', variants: ['light-pink', 'dark-pink'] },
-    { base: 'purple', variants: ['light-violet', 'dark-violet'] }
-  ];
-  
-  // Extra pair if we need more than 24 colors
-  const extraPair = ['light-teal', 'dark-teal'];
-  
-  let pool = [...baseIds];
-  
-  if (colors > 10) {
-    pool = ['yellow', 'white', 'brown']; // unreplaceable bases
-    for (const r of replaceable) {
-      pool.push(...r.variants);
-    }
-    pool.push(...extraPair);
-  }
-  
-  // We have a pool of colors (which contains no direct light/dark variants of the *same* base if the base is present).
-  // But we still want to avoid conflicts between different bases, like brown vs dark-orange.
-  const conflicts = {
-    'brown': ['dark-orange', 'dark-red', 'orange', 'red'],
-    'yellow': ['light-orange', 'light-green', 'orange'],
-    'white': ['light-grey'],
-    'grey': ['dark-grey'],
-    'dark-orange': ['brown', 'dark-red', 'orange'],
-    'light-orange': ['yellow', 'orange'],
-    'light-grey': ['white'],
-    'dark-red': ['brown', 'dark-orange', 'red'],
-    'light-green': ['yellow', 'green']
-  };
 
-  const shuffledPool = seededAdvancedShuffle(pool, level * 151 + 31, 2);
+  // Deterministic per-level shuffle drawing from the *entire* 26-colour
+  // catalogue (not a fixed small pool), so levels get real variety
+  // instead of recycling the same handful of colours forever.
+  let candidates = seededAdvancedShuffle(NUT_TYPES.map(t => t.id), level * 151 + 31, 2);
+
+  // Roughly one level in six, try to lead with a rare accent colour.
+  if (seededRandom(level * 47 + 5) < RARE_ACCENT_CHANCE) {
+    const accent = RARE_ACCENTS[Math.floor(seededRandom(level * 89 + 13) * RARE_ACCENTS.length)];
+    candidates = [accent, ...candidates.filter(id => id !== accent)];
+  }
+
+  // Greedily accept colours that don't clash (by real HSL distance)
+  // with anything already chosen.
   const chosen = [];
-  
-  for (const id of shuffledPool) {
+  for (const id of candidates) {
     if (chosen.length >= colors) break;
-    
-    // Check if this id conflicts with anything already in chosen
-    const idConflicts = conflicts[id] || [];
-    const hasConflict = chosen.some(c => idConflicts.includes(c));
-    
-    if (!hasConflict) {
-      chosen.push(id);
-    }
+    if (!clashesWithAny(id, chosen)) chosen.push(id);
   }
-  
-  // If we couldn't find enough non-conflicting colors, just fill the rest ignoring conflicts
-  if (chosen.length < colors) {
-    for (const id of shuffledPool) {
+
+  // Relaxation pass: only reachable at very high colour counts, where
+  // the fully clash-free catalogue can't fill every slot. Loosen the
+  // threshold gradually rather than falling back to raw randomness.
+  let relaxedThreshold = CLASH_THRESHOLD;
+  while (chosen.length < colors && relaxedThreshold > 6) {
+    relaxedThreshold -= 4;
+    for (const id of candidates) {
       if (chosen.length >= colors) break;
-      if (!chosen.includes(id)) {
-        chosen.push(id);
-      }
+      if (chosen.includes(id)) continue;
+      const tooClose = chosen.some(c => colorDistance(id, c) < relaxedThreshold);
+      if (!tooClose) chosen.push(id);
     }
   }
-  
+
+  // Last resort (unreachable with 26 colours at realistic level sizes):
+  // fill whatever's left ignoring distance entirely.
+  for (const id of candidates) {
+    if (chosen.length >= colors) break;
+    if (!chosen.includes(id)) chosen.push(id);
+  }
+
   return chosen;
 }
 
@@ -531,6 +567,46 @@ function NutBoltGame() {
   }, []);
   // ----------------------------------------------------------
   // END SUB-SECTION: EFFECT — LOCALSTORAGE INITIAL LOAD
+  // ----------------------------------------------------------
+
+
+  // ----------------------------------------------------------
+  // SUB-SECTION: GLOBAL LEADERBOARD SYNC (Supabase)
+  // fetchGlobalLeaderboard pulls every player's row from the shared
+  // `leaderboard` table and merges it into local playerScores state —
+  // "merge" so a fetch failure (offline, RLS misconfigured, etc.) can
+  // never erase what's already on screen. Runs once on mount and again
+  // each time the leaderboard modal is opened, so it's reasonably fresh
+  // without polling constantly.
+  // ----------------------------------------------------------
+  const fetchGlobalLeaderboard = async () => {
+    if (!isGlobalLeaderboardEnabled || !supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from('leaderboard')
+        .select('username, total_score, levels_played');
+      if (error) throw error;
+      if (!data) return;
+      setPlayerScores(prev => {
+        const merged = { ...prev };
+        for (const row of data) {
+          merged[row.username] = {
+            totalScore: row.total_score,
+            levelsPlayed: row.levels_played,
+          };
+        }
+        return merged;
+      });
+    } catch (err) {
+      console.warn('Global leaderboard fetch failed, showing local data only:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchGlobalLeaderboard();
+  }, []);
+  // ----------------------------------------------------------
+  // END SUB-SECTION: GLOBAL LEADERBOARD SYNC (Supabase)
   // ----------------------------------------------------------
 
 
@@ -1174,6 +1250,20 @@ function NutBoltGame() {
       const nextCompleted = [...completedLevels, level];
       setCompletedLevels(nextCompleted);
       localStorage.setItem('nb_completed_levels_v8', JSON.stringify(nextCompleted));
+
+      // Local cache above always succeeds and is what keeps this
+      // browser working offline; this is the "make it actually global"
+      // half — best-effort, never blocks or breaks play if it fails.
+      if (isGlobalLeaderboardEnabled && supabase) {
+        supabase.from('leaderboard').upsert({
+          username,
+          total_score: updated[username].totalScore,
+          levels_played: updated[username].levelsPlayed,
+          updated_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) console.warn('Global leaderboard sync failed:', error);
+        });
+      }
     }
 
     if (wasIntroLvl) {
@@ -1235,16 +1325,16 @@ function NutBoltGame() {
   // capping bolt width) when space is generous, so a sparse row
   // spreads out instead of bunching against one edge.
   // ----------------------------------------------------------
-  const BOARD_PADDING = 12;
-  const MIN_ROW_GAP = 12;
-  const MAX_ROW_GAP = 32;
-  const MIN_COL_GAP = 10;
-  const MAX_COL_GAP = 36;
+  const BOARD_PADDING = 8;
+  const MIN_ROW_GAP = 10;
+  const MAX_ROW_GAP = 26;
+  const MIN_COL_GAP = 8;
+  const MAX_COL_GAP = 28;
   const MIN_BOLT_W = 28;
   const MAX_BOLT_W = 86;
-  const DESIRED_COL_GAP = 20;
+  const DESIRED_COL_GAP = 14;
   const MIN_NUT_H = 12;
-  const MAX_NUT_H = 80; 
+  const MAX_NUT_H = 86; // matches MAX_BOLT_W so the width cap (below), not this, is what limits nut height
 
   // Fallback guards for initial render frames on mobile screens
   const safeWidth = Math.max(280, boardSize.width || (typeof window !== 'undefined' ? window.innerWidth : 350));
@@ -1294,10 +1384,13 @@ function NutBoltGame() {
   boltColWidth = Math.max(MIN_BOLT_W, Math.min(MAX_BOLT_W, boltColWidth));
   colGap = Math.max(MIN_COL_GAP, Math.min(MAX_COL_GAP, colGap));
 
-  // Calculate nutHeight bounded by boltColWidth to prevent abnormally tall thin nuts
-  let nutHeight = Math.max(MIN_NUT_H, Math.min(MAX_NUT_H, availHForPegs / ((safeCapacity + 1.2) * targetRows)));
+  // Calculate nutHeight bounded by boltColWidth to prevent abnormally tall thin nuts.
+  // The +0.6 (rather than a bigger buffer) reserves just enough headroom for the
+  // peg tip above the top nut, so more of the available height goes to the nuts
+  // themselves instead of empty space above them.
+  let nutHeight = Math.max(MIN_NUT_H, Math.min(MAX_NUT_H, availHForPegs / ((safeCapacity + 0.6) * targetRows)));
   nutHeight = Math.min(nutHeight, boltColWidth);
-  const pegHeight = Math.max(20, nutHeight * safeCapacity + 8);
+  const pegHeight = Math.max(20, nutHeight * safeCapacity + 5);
 
   const rowGap = targetRows > 1
     ? Math.max(MIN_ROW_GAP, Math.min(MAX_ROW_GAP, (availH - pegHeight * targetRows) / (targetRows - 1)))
@@ -1356,7 +1449,7 @@ function NutBoltGame() {
           Left: Leaderboard button | Center: Level nav (prev/label/next) | Right: Settings button
           ====================================================== */}
       <header ref={headerRef} className="w-full h-14 px-4 bg-zinc-950 border-b border-zinc-700 shrink-0 flex justify-between items-center z-35">
-        <button type="button" onClick={() => setShowLeaderboard(true)} className="w-10 h-10 rounded-xl flex items-center justify-center border bg-zinc-900 border-zinc-600 text-amber-300">
+        <button type="button" onClick={() => { setShowLeaderboard(true); fetchGlobalLeaderboard(); }} className="w-10 h-10 rounded-xl flex items-center justify-center border bg-zinc-900 border-zinc-600 text-amber-300">
           <Trophy size={20} />
         </button>
 
@@ -1409,9 +1502,9 @@ function NutBoltGame() {
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
                 >
                   {/* Slot guide lines (empty slot indicators) */}
-                  <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[3px]">
+                  <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[2px]">
                     {Array.from({ length: safeCapacity }).map((_, i) => (
-                      <div key={i} className="w-full border border-dashed border-slate-800/20 rounded bg-slate-900/5" style={{ height: `${Math.max(1, nutHeight - 3)}px` }} />
+                      <div key={i} className="w-full border border-dashed border-slate-800/20 rounded bg-slate-900/5" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
                     ))}
                   </div>
                   
@@ -1419,7 +1512,7 @@ function NutBoltGame() {
                   <div className={`absolute bottom-1 w-1 rounded-t-full transition-all ${isLocked ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : isSelected ? 'bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse' : 'bg-slate-800 group-hover:bg-slate-700'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px` }} />
                   
                   {/* Nut stack */}
-                  <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center gap-y-[3px] z-10 pointer-events-none">
+                  <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center gap-y-[2px] z-10 pointer-events-none">
                     {bolt.nuts.map((nut, nIdx) => {
                       const isTopNut = nIdx === bolt.nuts.length - 1;
                       const isNutRevealed = nut.revealed;
@@ -1430,10 +1523,10 @@ function NutBoltGame() {
                         <div 
                           key={nIdx} 
                           className={`rounded flex flex-col items-center justify-center border-b-2 shadow-sm transform transition-all w-full ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'} ${isSelected && isTopNut ? '-translate-y-3 ring-4 ring-blue-400 ring-offset-1 ring-offset-black scale-110 z-20 shadow-[0_10px_20px_rgba(0,0,0,0.5)]' : ''}`}
-                          style={{ height: `${Math.max(1, nutHeight - 3)}px` }}
+                          style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
                         >
                           {isNutRevealed ? (
-                            <Icon size={Math.max(8, Math.min(20, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
+                            <Icon size={Math.max(8, Math.min(24, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
                           ) : (
                             <div className="text-[10px] font-bold text-zinc-300">?</div>
                           )}
