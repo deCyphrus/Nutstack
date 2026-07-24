@@ -1498,7 +1498,7 @@ function NutBoltGame() {
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
                 >
                   {/* Slot guide lines (empty slot indicators) */}
-                  <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[2px]">
+                  <div className="absolute inset-x-0 bottom-3 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[2px]">
                     {Array.from({ length: safeCapacity }).map((_, i) => (
                       <div key={i} className="w-full border border-dashed border-slate-800/20 rounded bg-slate-900/5" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
                     ))}
@@ -1508,7 +1508,7 @@ function NutBoltGame() {
                   <div className={`absolute bottom-1 w-2.5 rounded-t-full transition-all border ${isLocked ? 'bg-amber-500 border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : isSelected ? 'bg-blue-400 border-blue-200 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse' : 'bg-slate-400 border-slate-200/50 group-hover:bg-slate-300'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px` }} />
                   
                   {/* Nut stack */}
-                  <div className="absolute inset-x-0 bottom-1 flex flex-col-reverse items-center gap-y-[2px] z-10 pointer-events-none">
+                  <div className="absolute inset-x-0 bottom-3 flex flex-col-reverse items-center gap-y-[2px] z-10 pointer-events-none">
                     {bolt.nuts.map((nut, nIdx) => {
                       const isTopNut = nIdx === bolt.nuts.length - 1;
                       const isNutRevealed = nut.revealed;
@@ -1540,8 +1540,8 @@ function NutBoltGame() {
                   
                   {/* Bolt base + lock icon */}
                   <div
-                    className={`absolute bottom-0 h-3.5 rounded-full border transition-colors ${isLocked ? 'bg-gradient-to-b from-yellow-300 to-amber-600 border-amber-200' : isSelected ? 'bg-gradient-to-b from-blue-300 to-blue-600 border-blue-200' : 'bg-gradient-to-b from-slate-300 to-slate-500 border-slate-100/60'}`}
-                    style={{ width: `${boltColWidth}px` }}
+                    className={`absolute h-4 rounded-full border transition-colors ${isLocked ? 'bg-gradient-to-b from-yellow-300 to-amber-600 border-amber-200' : isSelected ? 'bg-gradient-to-b from-blue-300 to-blue-600 border-blue-200' : 'bg-gradient-to-b from-slate-300 to-slate-500 border-slate-100/60'}`}
+                    style={{ width: `${boltColWidth * 0.8}px`, bottom: '-4px' }}
                   >
                     {isLocked && <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow"><Lock size={6} strokeWidth={3} /></div>}
                   </div>
