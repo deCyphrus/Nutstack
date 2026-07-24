@@ -11,6 +11,7 @@ import {
   Anchor, Bell, Cookie, Ghost
 } from 'lucide-react';
 import { supabase, isGlobalLeaderboardEnabled } from './lib/supabaseClient';
+import { playPickup, playPlace, playLock, playError } from './lib/sounds';
 // ============================================================
 // END SECTION: IMPORTS
 // ============================================================
@@ -445,6 +446,8 @@ function NutBoltGame() {
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [errorIdx, setErrorIdx] = useState(null);
   const [justLockedIdx, setJustLockedIdx] = useState(null);
+  const [justPlacedIdx, setJustPlacedIdx] = useState(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [history, setHistory] = useState([]);
   const [moveCount, setMoveCount] = useState(0);
   const [undoCount, setUndoCount] = useState(0);
@@ -553,6 +556,11 @@ function NutBoltGame() {
         if (!isNaN(parsedLevel) && parsedLevel >= 1) {
           setLevel(parsedLevel);
         }
+      }
+
+      const savedSound = localStorage.getItem('nb_sound_enabled_v1');
+      if (savedSound !== null) {
+        setSoundEnabled(savedSound === 'true');
       }
     } catch (err) {
       console.warn("Storage Load Warning:", err);
@@ -1076,6 +1084,7 @@ function NutBoltGame() {
     if (selectedIdx === null) {
       if (bolts[idx].nuts.length === 0 || checkBoltLock(bolts[idx].nuts)) return;
       setSelectedIdx(idx);
+      playPickup(soundEnabled);
     } else {
       if (selectedIdx === idx) {
         setSelectedIdx(null);
@@ -1087,6 +1096,7 @@ function NutBoltGame() {
 
       if (targetPeg.nuts.length >= currentConfig.capacity || checkBoltLock(targetPeg.nuts)) {
         setErrorIdx(idx);
+        playError(soundEnabled);
         setTimeout(() => setErrorIdx(null), 400);
         setSelectedIdx(null);
         return;
@@ -1095,6 +1105,7 @@ function NutBoltGame() {
       const topNut = sourcePeg.nuts[sourcePeg.nuts.length - 1];
       if (targetPeg.nuts.length > 0 && targetPeg.nuts[targetPeg.nuts.length - 1].id !== topNut.id) {
         setErrorIdx(idx);
+        playError(soundEnabled);
         setTimeout(() => setErrorIdx(null), 400);
         setSelectedIdx(null);
         return;
@@ -1139,10 +1150,14 @@ function NutBoltGame() {
       setBolts(updatedBolts);
       setSelectedIdx(null);
       setMoveCount(prev => prev + 1);
+      playPlace(soundEnabled);
+      setJustPlacedIdx(idx);
+      setTimeout(() => setJustPlacedIdx(null), 300);
       
       const targetUpdatedNuts = updatedBolts[idx].nuts;
       if (targetUpdatedNuts.length === currentConfig.capacity && targetUpdatedNuts.every(n => n.id === targetUpdatedNuts[0].id)) {
         setJustLockedIdx(idx);
+        playLock(soundEnabled);
         setTimeout(() => setJustLockedIdx(null), 800);
       }
     }
@@ -1419,7 +1434,7 @@ function NutBoltGame() {
   // overlays stacked via absolute positioning against this fixed box.
   // ----------------------------------------------------------
   return (
-    <div className="fixed inset-0 bg-black text-slate-100 flex flex-col overflow-hidden overscroll-none select-none">
+    <div className="fixed inset-0 text-slate-100 flex flex-col overflow-hidden overscroll-none select-none" style={{ background: 'radial-gradient(ellipse at 50% 40%, #0d0d10 0%, #000000 72%)' }}>
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes custom-shake {
           0%, 100% { transform: translateX(0); }
@@ -1432,11 +1447,21 @@ function NutBoltGame() {
           50% { box-shadow: 0 0 20px 10px rgba(245, 158, 11, 0); }
           100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
         }
+        @keyframes custom-nut-land {
+          0% { transform: scaleY(1) scaleX(1); }
+          30% { transform: scaleY(0.82) scaleX(1.1); }
+          60% { transform: scaleY(1.06) scaleX(0.97); }
+          100% { transform: scaleY(1) scaleX(1); }
+        }
         .animate-error-shake {
           animation: custom-shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
         }
         .animate-lock-burst {
           animation: custom-burst 0.6s ease-out both;
+        }
+        .animate-nut-land {
+          animation: custom-nut-land 0.28s cubic-bezier(.34,1.56,.64,1) both;
+          transform-origin: bottom center;
         }
       `}} />
 
@@ -1494,21 +1519,21 @@ function NutBoltGame() {
                 <div 
                   key={`bolt-${globalIdx}`} 
                   onClick={() => handleBoltClick(globalIdx)} 
-                  className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
+                  className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform transition-opacity duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isLocked ? 'opacity-60' : ''} ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
                 >
                   {/* Slot guide lines (empty slot indicators) */}
                   <div className="absolute inset-x-0 bottom-3 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[2px]">
                     {Array.from({ length: safeCapacity }).map((_, i) => (
-                      <div key={i} className="w-full border border-dashed border-slate-800/20 rounded bg-slate-900/5" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
+                      <div key={i} className="w-full border border-dashed border-slate-500/25 rounded bg-slate-500/[0.06]" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
                     ))}
                   </div>
                   
-                  {/* Peg rod */}
-                  <div className={`absolute bottom-1 w-2.5 rounded-t-full transition-all border ${isLocked ? 'bg-amber-500 border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : isSelected ? 'bg-blue-400 border-blue-200 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse' : 'bg-slate-400 border-slate-200/50 group-hover:bg-slate-300'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px` }} />
+                  {/* Peg rod (bolt thread) */}
+                  <div className={`absolute bottom-1 rounded-t-full transition-all border ${isLocked ? 'bg-amber-500 border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : isSelected ? 'bg-blue-400 border-blue-200 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse' : 'bg-slate-400 border-slate-200/50 group-hover:bg-slate-300'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px`, width: `${Math.max(4, boltColWidth * 0.3)}px` }} />
                   
                   {/* Nut stack */}
-                  <div className="absolute inset-x-0 bottom-3 flex flex-col-reverse items-center gap-y-[2px] z-10 pointer-events-none">
+                  <div className={`absolute inset-x-0 bottom-3 flex flex-col-reverse items-center gap-y-[2px] z-10 pointer-events-none ${justPlacedIdx === globalIdx ? 'animate-nut-land' : ''}`}>
                     {bolt.nuts.map((nut, nIdx) => {
                       const isTopNut = nIdx === bolt.nuts.length - 1;
                       const isNutRevealed = nut.revealed;
@@ -1518,7 +1543,7 @@ function NutBoltGame() {
                       return (
                         <div 
                           key={nIdx} 
-                          className={`rounded flex flex-col items-center justify-center border-b-2 shadow-sm transform transition-all w-full ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'} ${isSelected && isTopNut ? '-translate-y-3 ring-4 ring-blue-400 ring-offset-1 ring-offset-black scale-110 z-20 shadow-[0_10px_20px_rgba(0,0,0,0.5)]' : ''}`}
+                          className={`rounded flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.3),inset_0_-3px_5px_rgba(0,0,0,0.35)] transform transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'} ${isSelected && isTopNut ? '-translate-y-3 ring-4 ring-blue-400 ring-offset-1 ring-offset-black scale-110 z-20 shadow-[0_10px_20px_rgba(0,0,0,0.5)]' : ''}`}
                           style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
                         >
                           {isNutRevealed ? (
@@ -1540,10 +1565,12 @@ function NutBoltGame() {
                   
                   {/* Bolt base + lock icon */}
                   <div
-                    className={`absolute h-4 rounded-full border transition-colors ${isLocked ? 'bg-gradient-to-b from-yellow-300 to-amber-600 border-amber-200' : isSelected ? 'bg-gradient-to-b from-blue-300 to-blue-600 border-blue-200' : 'bg-gradient-to-b from-slate-300 to-slate-500 border-slate-100/60'}`}
-                    style={{ width: `${boltColWidth * 0.8}px`, bottom: '-4px' }}
+                    className={`absolute rounded-full border overflow-hidden transition-colors ${isLocked ? 'bg-gradient-to-b from-yellow-200 via-amber-400 to-amber-600 border-amber-100' : isSelected ? 'bg-gradient-to-b from-blue-200 via-blue-400 to-blue-600 border-blue-100' : 'bg-gradient-to-b from-zinc-100 via-zinc-300 to-zinc-500 border-white/60'}`}
+                    style={{ width: `${boltColWidth * 0.8}px`, height: '18px', bottom: '-4px' }}
                   >
-                    {isLocked && <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow"><Lock size={6} strokeWidth={3} /></div>}
+                    {/* Gloss highlight — reads as a shine on polished metal rather than a flat tint */}
+                    <div className="absolute inset-x-[10%] top-[14%] h-[30%] rounded-full bg-white/60 blur-[0.5px] pointer-events-none" />
+                    {isLocked && <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow z-10"><Lock size={6} strokeWidth={3} /></div>}
                   </div>
                 </div>
               );
@@ -1768,6 +1795,21 @@ function NutBoltGame() {
                 >
                   SAVE SIGNATURE
                 </button>
+
+                <div className="flex items-center justify-between pt-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sound Effects</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !soundEnabled;
+                      setSoundEnabled(next);
+                      localStorage.setItem('nb_sound_enabled_v1', String(next));
+                    }}
+                    className={`w-12 h-6 rounded-full relative transition-colors ${soundEnabled ? 'bg-blue-600' : 'bg-slate-700'}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${soundEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
                 
                 <div className="pt-4 border-t border-slate-800/60 mt-4 space-y-2">
                   <button 
