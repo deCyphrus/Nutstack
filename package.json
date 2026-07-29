@@ -1,7 +1,7 @@
 {
-  "name": "vite-react-typescript-starter",
+  "name": "nutstack",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
@@ -13,7 +13,6 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "lucide-react": "^0.344.0",
-    "puppeteer": "^25.4.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

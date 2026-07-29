@@ -1,6 +1,6 @@
 {
-  "name": "Nuts & Bolts Game",
-  "description": "Nut & Bolt puzzle game with deterministic level generation, color sorting, and grandmaster mode.",
+  "name": "Nutstack",
+  "description": "Nutstack - The ultimate nut & bolt sorting puzzle game with color sorting, level progression, and global leaderboards.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
