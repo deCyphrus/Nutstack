@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ============================================================
 // SECTION: IMPORTS
 // ============================================================
@@ -11,7 +12,13 @@ import {
   Anchor, Bell, Cookie, Ghost
 } from 'lucide-react';
 import { supabase, isGlobalLeaderboardEnabled } from './lib/supabaseClient';
-import { playPickup, playPlace, playLock, playError } from './lib/sounds';
+import { playPickup, playPlace, playLock, playError, playLevelComplete, playSectionComplete } from './lib/sounds';
+const safeStorage = {
+  getItem: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  setItem: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
+  clear: () => { try { localStorage.clear(); } catch (e) {} }
+};
+
 // ============================================================
 // END SECTION: IMPORTS
 // ============================================================
@@ -60,7 +67,7 @@ const NUT_TYPES = [
   { id: 'yellow',      bg: 'bg-yellow-300',  border: 'border-yellow-600',  hex: '#fde047', icon: Sun,      iconText: 'text-zinc-950' },
   { id: 'blue',        bg: 'bg-blue-700',    border: 'border-blue-950',    hex: '#1d4ed8', icon: Circle,   iconText: 'text-white' },
   { id: 'white',       bg: 'bg-white',       border: 'border-zinc-400',    hex: '#ffffff', icon: Square,   iconText: 'text-zinc-950' },
-  { id: 'grey',        bg: 'bg-zinc-600',    border: 'border-zinc-900',    hex: '#52525b', icon: Snowflake,iconText: 'text-white' },
+  { id: 'grey',        bg: 'bg-zinc-500',    border: 'border-zinc-700',    hex: '#71717a', icon: Snowflake,iconText: 'text-white' },
   { id: 'brown',       bg: 'bg-amber-800',   border: 'border-amber-950',   hex: '#92400e', icon: Zap,      iconText: 'text-white' },
   { id: 'hot-pink',    bg: 'bg-pink-400',    border: 'border-pink-700',    hex: '#f472b6', icon: Anchor,   iconText: 'text-white' },
   { id: 'green',       bg: 'bg-green-600',   border: 'border-green-900',   hex: '#16a34a', icon: Hexagon,  iconText: 'text-white' },
@@ -70,7 +77,7 @@ const NUT_TYPES = [
   { id: 'dark-blue',   bg: 'bg-indigo-900',  border: 'border-indigo-950',  hex: '#312e81', icon: Crown,    iconText: 'text-white' },
   { id: 'light-green', bg: 'bg-lime-300',    border: 'border-lime-600',    hex: '#bef264', icon: Leaf,     iconText: 'text-zinc-950' },
   { id: 'dark-green',  bg: 'bg-emerald-800', border: 'border-emerald-950', hex: '#065f46', icon: Flower2,  iconText: 'text-white' },
-  { id: 'light-grey',  bg: 'bg-slate-300',   border: 'border-slate-500',   hex: '#cbd5e1', icon: Diamond,  iconText: 'text-zinc-950' },
+  { id: 'light-grey',  bg: 'bg-slate-300',   border: 'border-slate-500',   hex: '#cbd5e1', icon: Ghost,    iconText: 'text-zinc-950' },
   { id: 'dark-grey',   bg: 'bg-slate-700',   border: 'border-slate-950',   hex: '#334155', icon: Gem,      iconText: 'text-white' },
   { id: 'light-red',   bg: 'bg-rose-300',    border: 'border-rose-600',    hex: '#fda4af', icon: Heart,    iconText: 'text-zinc-950' },
   { id: 'dark-red',    bg: 'bg-rose-900',    border: 'border-rose-950',    hex: '#881337', icon: Flame,    iconText: 'text-white' },
@@ -81,7 +88,7 @@ const NUT_TYPES = [
   { id: 'light-orange',bg: 'bg-orange-300',  border: 'border-orange-600',  hex: '#fdba74', icon: Apple,    iconText: 'text-zinc-950' },
   { id: 'dark-orange', bg: 'bg-orange-800',  border: 'border-orange-950',  hex: '#9a3412', icon: Mountain, iconText: 'text-white' },
   { id: 'light-violet',bg: 'bg-violet-300',  border: 'border-violet-600',  hex: '#c4b5fd', icon: Cookie,   iconText: 'text-zinc-950' },
-  { id: 'dark-violet', bg: 'bg-violet-900',  border: 'border-violet-950',  hex: '#4c1d95', icon: Ghost,    iconText: 'text-white' },
+  { id: 'dark-violet', bg: 'bg-violet-900',  border: 'border-violet-950',  hex: '#4c1d95', icon: Diamond,  iconText: 'text-white' },
 ];
 // ============================================================
 // END SECTION: NUT COLOR / ICON PALETTE (NUT_TYPES)
@@ -127,8 +134,8 @@ function colorDistance(idA, idB) {
 
 const CLASH_THRESHOLD = 29; // below this, two colours read as "the same" at a glance
 
-function clashesWithAny(id, chosenIds) {
-  return chosenIds.some(c => colorDistance(id, c) < CLASH_THRESHOLD);
+function clashesWithAny(id, chosenIds, threshold = CLASH_THRESHOLD) {
+  return chosenIds.some(c => colorDistance(id, c) < threshold);
 }
 // ============================================================
 // END SECTION: COLOUR DISTANCE / CONTRAST ENGINE
@@ -144,16 +151,12 @@ function clashesWithAny(id, chosenIds) {
 // CALCULATIONS, below) — so the two can never disagree about row shape.
 // ============================================================
 // Row thresholds apply to totalBolts (active + 2 empty):
-//   total ≤ 7          → 1 row
-//   total 8–14         → 2 rows
+//   total ≤ 6          → 1 row
+//   total 7–14         → 2 rows
 //   total ≥ 15         → 3 rows
 function getTargetRowCount(totalBolts, capacity) {
   if (totalBolts <= 6) return 1;
-  if (capacity <= 5) {
-    if (totalBolts <= 10) return 2;
-    return 3;
-  }
-  if (totalBolts <= 14) return 2;
+  if (totalBolts <= 12) return 2;
   return 3;
 }
 
@@ -237,7 +240,7 @@ function getRevealCapacityForLevel(level) {
 const RARE_ACCENTS = ['dark-teal', 'light-violet', 'dark-pink', 'light-teal', 'dark-violet'];
 const RARE_ACCENT_CHANCE = 1 / 6;
 
-function choosePaletteIds(level, colors, tutorialIds) {
+function choosePaletteIds(level, colors, tutorialIds, bgHex = null) {
   if (tutorialIds) return tutorialIds;
 
   // Deterministic per-level shuffle drawing from the *entire* 26-colour
@@ -254,8 +257,17 @@ function choosePaletteIds(level, colors, tutorialIds) {
   // Greedily accept colours that don't clash (by real HSL distance)
   // with anything already chosen.
   const chosen = [];
+  let bgMockId = null;
+  let targetColors = colors;
+  if (bgHex) {
+    bgMockId = 'bg-mock';
+    NUT_LAB[bgMockId] = hexToLab(bgHex);
+    chosen.push(bgMockId);
+    targetColors = colors + 1;
+  }
+
   for (const id of candidates) {
-    if (chosen.length >= colors) break;
+    if (chosen.length >= targetColors) break;
     if (!clashesWithAny(id, chosen)) chosen.push(id);
   }
 
@@ -263,12 +275,12 @@ function choosePaletteIds(level, colors, tutorialIds) {
   // the fully clash-free catalogue can't fill every slot. Loosen the
   // threshold gradually rather than falling back to raw randomness.
   let relaxedThreshold = CLASH_THRESHOLD;
-  while (chosen.length < colors && relaxedThreshold > 6) {
+  while (chosen.length < targetColors && relaxedThreshold > 6) {
     relaxedThreshold -= 4;
     for (const id of candidates) {
-      if (chosen.length >= colors) break;
+      if (chosen.length >= targetColors) break;
       if (chosen.includes(id)) continue;
-      const tooClose = chosen.some(c => colorDistance(id, c) < relaxedThreshold);
+      const tooClose = clashesWithAny(id, chosen, relaxedThreshold);
       if (!tooClose) chosen.push(id);
     }
   }
@@ -276,10 +288,13 @@ function choosePaletteIds(level, colors, tutorialIds) {
   // Last resort (unreachable with 26 colours at realistic level sizes):
   // fill whatever's left ignoring distance entirely.
   for (const id of candidates) {
-    if (chosen.length >= colors) break;
+    if (chosen.length >= targetColors) break;
     if (!chosen.includes(id)) chosen.push(id);
   }
 
+  if (bgMockId) {
+    return chosen.filter(id => id !== bgMockId).slice(0, colors);
+  }
   return chosen;
 }
 
@@ -298,12 +313,13 @@ function getNormalCapacity(level, previousCapacity, isDuplicate) {
 // Defines rules for capacity, colors, hidden nuts, and bolt counts
 // based on the current level number.
 // ============================================================
-function generateDeterministicLevelConfig(level) {
-  if (_levelConfigCache[level]) return _levelConfigCache[level];
+function generateDeterministicLevelConfig(level, bgHex = null) {
+  const cacheKey = `${level}-${bgHex || 'default'}`;
+  if (_levelConfigCache[cacheKey]) return _levelConfigCache[cacheKey];
 
   const tutorial = TUTORIAL_CONFIGS[level];
   const earlyOverride = EARLY_LEVEL_OVERRIDES[level];
-  const previous = level > 1 ? generateDeterministicLevelConfig(level - 1) : null;
+  const previous = level > 1 ? generateDeterministicLevelConfig(level - 1, bgHex) : null;
   const revealThisLevel = level > 5 && isRevealLevel(level);
   const isDoubleColor = level > 5 && isDoubleColorLevel(level);
   const capacity = tutorial
@@ -335,7 +351,7 @@ function generateDeterministicLevelConfig(level) {
   const hiddenActiveCount = tutorial
     ? tutorial.hiddenActiveCount
     : revealThisLevel ? totalBolts - rowSizes[rows - 1] : 0;
-  const colorIds = choosePaletteIds(level, colors, tutorial?.colorIds);
+  const colorIds = choosePaletteIds(level, colors, tutorial?.colorIds, bgHex);
   const duplicateColorIds = duplicateStacks === 0
     ? []
     : seededAdvancedShuffle(colorIds, level * 613, 2).slice(0, duplicateStacks);
@@ -354,7 +370,7 @@ function generateDeterministicLevelConfig(level) {
     generationSeed: level * 999,
   };
   assertLevelConfig(config, previous);
-  _levelConfigCache[level] = config;
+  _levelConfigCache[cacheKey] = config;
   return config;
 }
 
@@ -433,6 +449,125 @@ export function validateGeneratedLevels(levelCount = 100) {
 
 
 // ============================================================
+// SECTION: 2D COLOR PAD PICKER COMPONENT
+// Single-pad color picker: X = Hue (0-360°), Y = Brightness/Shade.
+// Includes visual target reticle and mobile touch prevention.
+// ============================================================
+function hslToHex(h, s, l) {
+  l /= 100;
+  const a = (s * Math.min(l, 1 - l)) / 100;
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function ColorPadPicker({ color, onChange }) {
+  const padRef = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [marker, setMarker] = useState({ x: 50, y: 50 }); // % coordinates for target ring
+
+  const handlePointer = (e) => {
+    if (!padRef.current) return;
+    const rect = padRef.current.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+
+    // Update selection ring position
+    setMarker({ x: x * 100, y: y * 100 });
+
+    const hue = Math.round(x * 360);
+    // Y: 0 (top) = 100% lightness (pure white), Y: 1 (bottom) = 0% lightness (pure black)
+    const lightness = Math.round((1 - y) * 100);
+
+    const newHex = hslToHex(hue, 80, lightness);
+    onChange(newHex);
+  };
+
+  const handleMouseDown = (e) => {
+    handlePointer(e);
+    const onMove = (me) => handlePointer(me);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const handleTouch = (e) => {
+    if (e.cancelable) e.preventDefault();
+    handlePointer(e);
+  };
+
+  return (
+    <div className="relative">
+      {/* Color Swatch Trigger Button */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-7 h-7 rounded-full border-2 border-white/60 shadow-md transition-transform active:scale-95 flex items-center justify-center overflow-hidden cursor-pointer"
+        style={{ backgroundColor: color }}
+      >
+        <div className="w-full h-full rounded-full ring-1 ring-black/20" />
+      </button>
+
+      {/* Pop-over 2D Pad */}
+      {isOpen && (
+        <div className="absolute right-0 top-9 z-50 p-3 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col items-center space-y-2 animate-in fade-in zoom-in-95 duration-150">
+          <div className="flex justify-between items-center w-full px-1 gap-4">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Drag to select</span>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="w-6 h-6 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div
+            ref={padRef}
+            onMouseDown={handleMouseDown}
+            onTouchStart={handleTouch}
+            onTouchMove={handleTouch}
+            className="w-48 h-36 rounded-xl cursor-crosshair relative overflow-hidden border border-white/20 touch-none shadow-inner select-none"
+            style={{
+              background: `
+                linear-gradient(to top, #000000 0%, transparent 50%, #ffffff 100%),
+                linear-gradient(to right, 
+                  hsl(0, 80%, 50%), 
+                  hsl(60, 80%, 50%), 
+                  hsl(120, 80%, 50%), 
+                  hsl(180, 80%, 50%), 
+                  hsl(240, 80%, 50%), 
+                  hsl(300, 80%, 50%), 
+                  hsl(360, 80%, 50%)
+                )
+              `,
+            }}
+          >
+            {/* Visual Target Ring / Reticle */}
+            <div
+              className="absolute w-4 h-4 rounded-full border-2 border-white ring-1 ring-black/40 shadow-lg pointer-events-none transform -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ============================================================
 // SECTION: MAIN GAME COMPONENT (NutBoltGame)
 // All game state, logic, layout calculations, and JSX live here.
 // ============================================================
@@ -467,7 +602,17 @@ function NutBoltGame() {
   const [pendingUsername, setPendingUsername] = useState('');
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
 
-  const currentConfig = generateDeterministicLevelConfig(level);
+  const [touchDrag, setTouchDrag] = useState<{
+    sourceIdx: number;
+    x: number;
+    y: number;
+    movingNuts: Nut[];
+  } | null>(null);
+
+  const [bgColor, setBgColor] = useState('#e2e8f0');
+  const derivedHeaderColor = `color-mix(in srgb, ${bgColor}, #ffffff 6%)`;
+
+  const currentConfig = generateDeterministicLevelConfig(level, bgColor);
   
    // Safe default dimensions so calculations never evaluate to 0 on mobile startup
   const [boardSize, setBoardSize] = useState({ 
@@ -485,6 +630,8 @@ function NutBoltGame() {
   const boardRef = useRef(null);
   const headerRef = useRef(null);
   const footerRef = useRef(null);
+  const dragPreviewRefs = useRef({});
+  const lastSoundPlayedLevelRef = useRef(null);
   // ----------------------------------------------------------
   // END SUB-SECTION: STATE DECLARATIONS
   // ----------------------------------------------------------
@@ -532,11 +679,11 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   useEffect(() => {
     try {
-      const savedName = localStorage.getItem('nb_arcade_name_v7');
+      const savedName = safeStorage.getItem('nb_arcade_name_v7');
       if (savedName) setUsername(savedName);
       else setShowUsernamePrompt(true);
       
-      const savedLeaderboard = localStorage.getItem('nb_global_leaderboard_v7');
+      const savedLeaderboard = safeStorage.getItem('nb_global_leaderboard_v7');
       if (savedLeaderboard) {
         const parsed = JSON.parse(savedLeaderboard);
         setPlayerScores((parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {});
@@ -544,13 +691,13 @@ function NutBoltGame() {
       
       // Puzzle data is versioned: old snapshots use palette IDs and layouts
       // that no longer exist, so they must never be restored into v8 boards.
-      const savedCompleted = localStorage.getItem('nb_completed_levels_v8');
+      const savedCompleted = safeStorage.getItem('nb_completed_levels_v8');
       if (savedCompleted) {
         const parsed = JSON.parse(savedCompleted);
         setCompletedLevels(Array.isArray(parsed) ? parsed : []);
       }
 
-      const savedCurrentLevel = localStorage.getItem('nb_current_level_v8');
+      const savedCurrentLevel = safeStorage.getItem('nb_current_level_v8');
       if (savedCurrentLevel) {
         const parsedLevel = parseInt(savedCurrentLevel, 10);
         if (!isNaN(parsedLevel) && parsedLevel >= 1) {
@@ -558,10 +705,14 @@ function NutBoltGame() {
         }
       }
 
-      const savedSound = localStorage.getItem('nb_sound_enabled_v1');
+      const savedSound = safeStorage.getItem('nb_sound_enabled_v1');
       if (savedSound !== null) {
         setSoundEnabled(savedSound === 'true');
       }
+
+      const savedBgColor = safeStorage.getItem('nb_bg_color_v1');
+      if (savedBgColor && savedBgColor !== '#000000') setBgColor(savedBgColor);
+      else setBgColor('#e2e8f0');
     } catch (err) {
       console.warn("Storage Load Warning:", err);
       setShowUsernamePrompt(true);
@@ -620,7 +771,7 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   useEffect(() => {
     if (isInitialLoadDone) {
-      localStorage.setItem('nb_current_level_v8', String(level));
+      safeStorage.setItem('nb_current_level_v8', String(level));
     }
   }, [level, isInitialLoadDone]);
   // ----------------------------------------------------------
@@ -698,28 +849,53 @@ function NutBoltGame() {
 
     const isClear = bolts.every(b => b.nuts.length === 0 || checkBoltLock(b.nuts));
     
-    try {
-      if (!isClear) {
-        const unfinished = JSON.parse(localStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
-        unfinished[`stage_${level}`] = { bolts, history, moveCount, undoCount };
-        localStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
-      } else {
-        const unfinished = JSON.parse(localStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
-        if (unfinished[`stage_${level}`]) {
-          delete unfinished[`stage_${level}`];
-          localStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
+    if (isClear) {
+      if (lastSoundPlayedLevelRef.current !== level) {
+        lastSoundPlayedLevelRef.current = level;
+        let isSectionComplete = false;
+        if (level % 10 === 0) {
+          const sectionStartLvl = level - 9;
+          const prev9Complete = Array.from({ length: 9 }, (_, i) => sectionStartLvl + i)
+            .every(lvl => completedLevels.includes(lvl));
+          if (prev9Complete) {
+            isSectionComplete = true;
+          }
         }
 
-        const snapshots = JSON.parse(localStorage.getItem('nb_level_snapshots_v8') || '{}');
+        if (isSectionComplete) {
+          playSectionComplete(soundEnabled);
+        } else {
+          playLevelComplete(soundEnabled);
+        }
+      }
+    } else {
+      if (lastSoundPlayedLevelRef.current === level) {
+        lastSoundPlayedLevelRef.current = null;
+      }
+    }
+
+    try {
+      if (!isClear) {
+        const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
+        unfinished[`stage_${level}`] = { bolts, history, moveCount, undoCount };
+        safeStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
+      } else {
+        const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
+        if (unfinished[`stage_${level}`]) {
+          delete unfinished[`stage_${level}`];
+          safeStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
+        }
+
+        const snapshots = JSON.parse(safeStorage.getItem('nb_level_snapshots_v8') || '{}');
         if (!snapshots[level]) {
           snapshots[level] = bolts;
-          localStorage.setItem('nb_level_snapshots_v8', JSON.stringify(snapshots));
+          safeStorage.setItem('nb_level_snapshots_v8', JSON.stringify(snapshots));
         }
       }
     } catch (err) {
       console.warn("State save warning:", err);
     }
-  }, [bolts, history, moveCount, undoCount, level, isInitialLoadDone]);
+  }, [bolts, history, moveCount, undoCount, level, isInitialLoadDone, completedLevels, soundEnabled]);
   // ----------------------------------------------------------
   // END SUB-SECTION: EFFECT — SAVE IN-PROGRESS STATE / DETECT WIN
   // ----------------------------------------------------------
@@ -758,7 +934,7 @@ function NutBoltGame() {
     const clean = pendingUsername.trim().toUpperCase().slice(0, 3);
     const finalName = clean.length > 0 ? clean : 'AAA';
     setUsername(finalName);
-    localStorage.setItem('nb_arcade_name_v7', finalName);
+    safeStorage.setItem('nb_arcade_name_v7', finalName);
     setShowUsernamePrompt(false);
   };
   // ----------------------------------------------------------
@@ -972,7 +1148,7 @@ function NutBoltGame() {
     if (!forceNew) {
       if (completedLevels.includes(level)) {
         try {
-          const snapshots = JSON.parse(localStorage.getItem('nb_level_snapshots_v8') || '{}');
+          const snapshots = JSON.parse(safeStorage.getItem('nb_level_snapshots_v8') || '{}');
           if (snapshots[level]) {
             setBolts(snapshots[level]);
             setSelectedIdx(null);
@@ -986,7 +1162,7 @@ function NutBoltGame() {
         }
       } else {
         try {
-          const unfinished = JSON.parse(localStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
+          const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
           if (unfinished[`stage_${level}`]) {
             const saved = unfinished[`stage_${level}`];
             setBolts(saved.bolts);
@@ -1074,91 +1250,185 @@ function NutBoltGame() {
   // ----------------------------------------------------------
 
 
+  const findTargetBoltForDrop = (clientX: number, clientY: number, sourceIdx: number): number | null => {
+    if (sourceIdx < 0 || sourceIdx >= bolts.length) return null;
+    const sourcePeg = bolts[sourceIdx];
+    if (!sourcePeg || sourcePeg.nuts.length === 0) return null;
+    const topNut = sourcePeg.nuts[sourcePeg.nuts.length - 1];
+
+    const isValidTarget = (targetIdx: number) => {
+      if (targetIdx === sourceIdx) return false;
+      const targetPeg = bolts[targetIdx];
+      if (!targetPeg) return false;
+      if (targetPeg.nuts.length >= currentConfig.capacity) return false;
+      if (checkBoltLock(targetPeg.nuts)) return false;
+      if (targetPeg.nuts.length > 0 && targetPeg.nuts[targetPeg.nuts.length - 1].id !== topNut.id) return false;
+      return true;
+    };
+
+    // 1. Direct hit check via elementFromPoint
+    const targetEl = document.elementFromPoint(clientX, clientY);
+    const directBoltEl = targetEl?.closest('[data-bolt-idx]');
+    if (directBoltEl) {
+      const directIdx = parseInt(directBoltEl.getAttribute('data-bolt-idx') || '-1');
+      if (!isNaN(directIdx) && directIdx >= 0 && directIdx !== sourceIdx) {
+        return directIdx;
+      }
+    }
+
+    // 2. Measure proximity to all bolt elements
+    const boltElements = Array.from(document.querySelectorAll('[data-bolt-idx]'));
+    if (boltElements.length === 0) return null;
+
+    let bestValidIdx: number | null = null;
+    let minValidDist = Infinity;
+
+    let bestAnyIdx: number | null = null;
+    let minAnyDist = Infinity;
+
+    let validTargetCount = 0;
+
+    for (const el of boltElements) {
+      const idxAttr = el.getAttribute('data-bolt-idx');
+      if (idxAttr === null) continue;
+      const bIdx = parseInt(idxAttr);
+      if (isNaN(bIdx) || bIdx < 0) continue;
+
+      const rect = el.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      const dist = Math.hypot(clientX - centerX, clientY - centerY);
+
+      const valid = isValidTarget(bIdx);
+      if (valid) {
+        validTargetCount++;
+        if (dist < minValidDist) {
+          minValidDist = dist;
+          bestValidIdx = bIdx;
+        }
+      }
+
+      if (bIdx !== sourceIdx && dist < minAnyDist) {
+        minAnyDist = dist;
+        bestAnyIdx = bIdx;
+      }
+    }
+
+    // Smart forgiving distance thresholds:
+    // If there is only 1 valid compatible bolt for this nut on the board, allow a generous 320px radius
+    // If there are multiple valid compatible bolts, allow up to 200px for the closest valid one
+    const validRadiusThreshold = validTargetCount === 1 ? 320 : 200;
+
+    if (bestValidIdx !== null && minValidDist <= validRadiusThreshold) {
+      return bestValidIdx;
+    }
+
+    // Fallback to closest bolt if drop was reasonably near any bolt (within 130px)
+    if (bestAnyIdx !== null && minAnyDist <= 130) {
+      return bestAnyIdx;
+    }
+
+    return null;
+  };
+
   // ----------------------------------------------------------
   // SUB-SECTION: BOLT CLICK HANDLER (handleBoltClick)
   // First tap selects a source bolt; second tap on a different bolt
   // attempts to move the top matching run of nuts to the target.
   // Reveals the next hidden nut on the source bolt after a move.
   // ----------------------------------------------------------
-  const handleBoltClick = (idx) => {
-    if (selectedIdx === null) {
-      if (bolts[idx].nuts.length === 0 || checkBoltLock(bolts[idx].nuts)) return;
-      setSelectedIdx(idx);
-      playPickup(soundEnabled);
-    } else {
-      if (selectedIdx === idx) {
-        setSelectedIdx(null);
-        return;
-      }
-      
-      const sourcePeg = bolts[selectedIdx];
-      const targetPeg = bolts[idx];
+  const executeMove = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) {
+      setSelectedIdx(null);
+      return;
+    }
+    
+    const sourcePeg = bolts[fromIdx];
+    const targetPeg = bolts[toIdx];
 
-      if (targetPeg.nuts.length >= currentConfig.capacity || checkBoltLock(targetPeg.nuts)) {
-        setErrorIdx(idx);
-        playError(soundEnabled);
-        setTimeout(() => setErrorIdx(null), 400);
-        setSelectedIdx(null);
-        return;
-      }
+    if (!sourcePeg || !targetPeg || sourcePeg.nuts.length === 0) {
+      setSelectedIdx(null);
+      return;
+    }
 
-      const topNut = sourcePeg.nuts[sourcePeg.nuts.length - 1];
-      if (targetPeg.nuts.length > 0 && targetPeg.nuts[targetPeg.nuts.length - 1].id !== topNut.id) {
-        setErrorIdx(idx);
-        playError(soundEnabled);
-        setTimeout(() => setErrorIdx(null), 400);
-        setSelectedIdx(null);
-        return;
-      }
+    if (targetPeg.nuts.length >= currentConfig.capacity || checkBoltLock(targetPeg.nuts)) {
+      setErrorIdx(toIdx);
+      playError(soundEnabled);
+      setTimeout(() => setErrorIdx(null), 400);
+      setSelectedIdx(null);
+      return;
+    }
 
-      const runCount = getTopRunCount(sourcePeg.nuts);
-      const availableSpace = currentConfig.capacity - targetPeg.nuts.length;
-      const moveAmount = Math.min(runCount, availableSpace);
+    const topNut = sourcePeg.nuts[sourcePeg.nuts.length - 1];
+    if (targetPeg.nuts.length > 0 && targetPeg.nuts[targetPeg.nuts.length - 1].id !== topNut.id) {
+      setErrorIdx(toIdx);
+      playError(soundEnabled);
+      setTimeout(() => setErrorIdx(null), 400);
+      setSelectedIdx(null);
+      return;
+    }
 
-      if (moveAmount <= 0) {
-        setSelectedIdx(null);
-        return;
-      }
+    const runCount = getTopRunCount(sourcePeg.nuts);
+    const availableSpace = currentConfig.capacity - targetPeg.nuts.length;
+    const moveAmount = Math.min(runCount, availableSpace);
 
-      const movingNuts = sourcePeg.nuts.slice(sourcePeg.nuts.length - moveAmount);
-      setHistory(prev => [...prev, JSON.stringify(bolts)]);
+    if (moveAmount <= 0) {
+      setSelectedIdx(null);
+      return;
+    }
 
-      const updatedBolts = bolts.map((b, i) => {
-        if (i === selectedIdx) {
-          const remaining = b.nuts.slice(0, b.nuts.length - moveAmount);
-          if (remaining.length > 0) {
-            let currentIdx = remaining.length - 1;
-            if (!remaining[currentIdx].revealed) {
-              remaining[currentIdx] = { ...remaining[currentIdx], revealed: true };
-            }
-            while (currentIdx > 0) {
-              const nextIdx = currentIdx - 1;
-              if (!remaining[nextIdx].revealed && remaining[nextIdx].id === remaining[currentIdx].id) {
-                remaining[nextIdx] = { ...remaining[nextIdx], revealed: true };
-                currentIdx--;
-              } else {
-                break;
-              }
+    const movingNuts = sourcePeg.nuts.slice(sourcePeg.nuts.length - moveAmount);
+    setHistory(prev => [...prev, JSON.stringify(bolts)]);
+
+    const updatedBolts = bolts.map((b, i) => {
+      if (i === fromIdx) {
+        const remaining = b.nuts.slice(0, b.nuts.length - moveAmount);
+        if (remaining.length > 0) {
+          let currentIdx = remaining.length - 1;
+          if (!remaining[currentIdx].revealed) {
+            remaining[currentIdx] = { ...remaining[currentIdx], revealed: true };
+          }
+          while (currentIdx > 0) {
+            const nextIdx = currentIdx - 1;
+            if (!remaining[nextIdx].revealed && remaining[nextIdx].id === remaining[currentIdx].id) {
+              remaining[nextIdx] = { ...remaining[nextIdx], revealed: true };
+              currentIdx--;
+            } else {
+              break;
             }
           }
-          return { ...b, nuts: remaining };
         }
-        if (i === idx) return { ...b, nuts: [...b.nuts, ...movingNuts] };
-        return b;
-      });
+        return { ...b, nuts: remaining };
+      }
+      if (i === toIdx) return { ...b, nuts: [...b.nuts, ...movingNuts] };
+      return b;
+    });
 
-      setBolts(updatedBolts);
-      setSelectedIdx(null);
-      setMoveCount(prev => prev + 1);
-      playPlace(soundEnabled);
-      setJustPlacedIdx(idx);
-      setTimeout(() => setJustPlacedIdx(null), 300);
-      
-      const targetUpdatedNuts = updatedBolts[idx].nuts;
-      if (targetUpdatedNuts.length === currentConfig.capacity && targetUpdatedNuts.every(n => n.id === targetUpdatedNuts[0].id)) {
-        setJustLockedIdx(idx);
-        playLock(soundEnabled);
-        setTimeout(() => setJustLockedIdx(null), 800);
+    setBolts(updatedBolts);
+    setSelectedIdx(null);
+    setMoveCount(prev => prev + 1);
+    playPlace(soundEnabled);
+    setJustPlacedIdx(toIdx);
+    setTimeout(() => setJustPlacedIdx(null), 300);
+    
+    const targetUpdatedNuts = updatedBolts[toIdx].nuts;
+    if (targetUpdatedNuts.length === currentConfig.capacity && targetUpdatedNuts.every(n => n.id === targetUpdatedNuts[0].id)) {
+      setJustLockedIdx(toIdx);
+      const lockedCount = updatedBolts.filter(b => checkBoltLock(b.nuts)).length;
+      const stepIndex = Math.max(0, lockedCount - 1);
+      playLock(soundEnabled, stepIndex);
+      setTimeout(() => setJustLockedIdx(null), 800);
+    }
+  };
+
+  const handleBoltClick = (idx: number) => {
+    // Pure drag and drop handling; ensure any lingering selection is cleared
+    if (selectedIdx !== null) {
+      if (selectedIdx !== idx) {
+        executeMove(selectedIdx, idx);
+      } else {
+        setSelectedIdx(null);
       }
     }
   };
@@ -1190,10 +1460,10 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   const handleReset = () => {
     try {
-      const unfinished = JSON.parse(localStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
+      const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
       if (unfinished[`stage_${level}`]) {
         delete unfinished[`stage_${level}`];
-        localStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
+        safeStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
       }
     } catch {
       /* ignore */
@@ -1211,7 +1481,7 @@ function NutBoltGame() {
   // to defaults. Triggered from the Settings modal confirm flow.
   // ----------------------------------------------------------
   const handleWipeData = () => {
-    localStorage.clear();
+    safeStorage.clear();
     setLevel(1);
     setCompletedLevels([]);
     setPlayerScores({});
@@ -1257,10 +1527,10 @@ function NutBoltGame() {
       updated[username].totalScore += scoreGenerated;
       updated[username].levelsPlayed += 1;
       setPlayerScores(updated);
-      localStorage.setItem('nb_global_leaderboard_v7', JSON.stringify(updated));
+      safeStorage.setItem('nb_global_leaderboard_v7', JSON.stringify(updated));
       const nextCompleted = [...completedLevels, level];
       setCompletedLevels(nextCompleted);
-      localStorage.setItem('nb_completed_levels_v8', JSON.stringify(nextCompleted));
+      safeStorage.setItem('nb_completed_levels_v8', JSON.stringify(nextCompleted));
 
       // Local cache above always succeeds and is what keeps this
       // browser working offline; this is the "make it actually global"
@@ -1337,19 +1607,22 @@ function NutBoltGame() {
   // spreads out instead of bunching against one edge.
   // ----------------------------------------------------------
   const BOARD_PADDING = 8;
-  const MIN_ROW_GAP = 10;
-  const MAX_ROW_GAP = 26;
+  const MIN_ROW_GAP = 16;
+  const MAX_ROW_GAP = 52;
   const MIN_COL_GAP = 8;
   const MAX_COL_GAP = 28;
   const MIN_BOLT_W = 28;
   const MAX_BOLT_W = 86;
   const DESIRED_COL_GAP = 14;
-  const MIN_NUT_H = 12;
+  const MIN_NUT_H = 18;
   const MAX_NUT_H = 86; // matches MAX_BOLT_W so the width cap (below), not this, is what limits nut height
 
-  // Fallback guards for initial render frames on mobile screens
+  // Fallback guards for initial render frames on mobile screens.
+  // boardSize.height is measured on boardRef, which is already flex-1 between header & footer.
   const safeWidth = Math.max(280, boardSize.width || (typeof window !== 'undefined' ? window.innerWidth : 350));
-  const safeHeight = Math.max(400, boardSize.height || (typeof window !== 'undefined' ? window.innerHeight : 500));
+  const safeHeight = boardSize.height > 0
+    ? boardSize.height
+    : Math.max(400, (typeof window !== 'undefined' ? window.innerHeight : 500) - chromeHeight);
 
   const boardWidthAvail = Math.max(100, safeWidth - BOARD_PADDING * 2);
   const totalBolts = currentConfig.activeBolts + currentConfig.emptyBolts;
@@ -1363,13 +1636,12 @@ function NutBoltGame() {
   const columns = Math.max(...rowSizes);
   const safeCapacity = Math.max(1, cap);
 
-  // Real measured header + footer height (falls back to 120 before first measure)
-  const headerFooterHeight = chromeHeight;
-  const availH = Math.max(200, safeHeight - headerFooterHeight - (BOARD_PADDING * 2));
+  const availH = Math.max(200, safeHeight - (BOARD_PADDING * 2));
 
-  // Reserve row-gap space BEFORE sizing nuts, so the gaps we render
-  // afterward can never push the last row's pegs off-screen.
-  const reservedRowGapH = targetRows > 1 ? MIN_ROW_GAP * (targetRows - 1) : 0;
+  // Reserve row-gap space AND bolt base overhang (6px bottom overflow per row)
+  // BEFORE sizing nuts, so the row gaps we render can never push bolt bases onto the stack below.
+  const baseOverhangReserve = targetRows * 6;
+  const reservedRowGapH = (targetRows > 1 ? MIN_ROW_GAP * (targetRows - 1) : 0) + baseOverhangReserve;
   const availHForPegs = Math.max(100, availH - reservedRowGapH);
 
   // Solve bolt width + column gap together so a row always fits exactly:
@@ -1377,7 +1649,7 @@ function NutBoltGame() {
   // below minimum width, then only shrink bolt width as a last resort.
   // If there's slack instead, grow the gap (up to MAX_COL_GAP) rather
   // than just capping bolt width, so sparse rows spread out evenly.
-  let colGap = columns > 1 ? DESIRED_COL_GAP : 0;
+  let colGap = columns > 1 ? (columns >= 6 ? 10 : DESIRED_COL_GAP) : 0;
   let boltColWidth = columns > 0 ? (boardWidthAvail - colGap * (columns - 1)) / columns : boardWidthAvail;
 
   if (boltColWidth < MIN_BOLT_W && columns > 1) {
@@ -1395,16 +1667,14 @@ function NutBoltGame() {
   boltColWidth = Math.max(MIN_BOLT_W, Math.min(MAX_BOLT_W, boltColWidth));
   colGap = Math.max(MIN_COL_GAP, Math.min(MAX_COL_GAP, colGap));
 
-  // Calculate nutHeight bounded by boltColWidth to prevent abnormally tall thin nuts.
-  // The +0.6 (rather than a bigger buffer) reserves just enough headroom for the
-  // peg tip above the top nut, so more of the available height goes to the nuts
-  // themselves instead of empty space above them.
-  let nutHeight = Math.max(MIN_NUT_H, Math.min(MAX_NUT_H, availHForPegs / ((safeCapacity + 0.6) * targetRows)));
-  nutHeight = Math.min(nutHeight, boltColWidth);
-  const pegHeight = Math.max(20, nutHeight * safeCapacity + 5);
+  // Calculate nutHeight bounded by boltColWidth so nuts scale up to fill vertical space while never being taller than wide.
+  const idealNutH = boltColWidth * 0.90;
+  let nutHeight = Math.min(idealNutH, Math.max(MIN_NUT_H, (availHForPegs - targetRows * 6) / (safeCapacity * targetRows)));
+  nutHeight = Math.max(MIN_NUT_H, Math.min(MAX_NUT_H, nutHeight));
+  const pegHeight = Math.max(25, nutHeight * safeCapacity + 8);
 
   const rowGap = targetRows > 1
-    ? Math.max(MIN_ROW_GAP, Math.min(MAX_ROW_GAP, (availH - pegHeight * targetRows) / (targetRows - 1)))
+    ? Math.max(MIN_ROW_GAP, Math.min(MAX_ROW_GAP, (availH - baseOverhangReserve - pegHeight * targetRows) / (targetRows - 1)))
     : 0;
 
   // Chunk bolts into rows while preserving true state array indices
@@ -1434,7 +1704,7 @@ function NutBoltGame() {
   // overlays stacked via absolute positioning against this fixed box.
   // ----------------------------------------------------------
   return (
-    <div className="fixed inset-0 text-slate-100 flex flex-col overflow-hidden overscroll-none select-none" style={{ background: 'radial-gradient(ellipse at 50% 40%, #0d0d10 0%, #000000 72%)' }}>
+    <div className="fixed inset-0 text-slate-100 flex flex-col overflow-hidden overscroll-none select-none" style={{ backgroundColor: bgColor, backgroundImage: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.7) 100%)' }}>
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes custom-shake {
           0%, 100% { transform: translateX(0); }
@@ -1469,24 +1739,24 @@ function NutBoltGame() {
           HEADER BAR
           Left: Leaderboard button | Center: Level nav (prev/label/next) | Right: Settings button
           ====================================================== */}
-      <header ref={headerRef} className="w-full h-14 px-4 bg-zinc-950 border-b border-zinc-700 shrink-0 flex justify-between items-center z-35">
-        <button type="button" onClick={() => { setShowLeaderboard(true); fetchGlobalLeaderboard(); }} className="w-10 h-10 rounded-xl flex items-center justify-center border bg-zinc-900 border-zinc-600 text-amber-300">
+      <header ref={headerRef} className="w-full h-16 px-4 border-b border-white/20 shrink-0 flex justify-between items-center z-35 bg-white/15 backdrop-blur-xl shadow-sm">
+        <button type="button" onClick={() => { setShowLeaderboard(true); fetchGlobalLeaderboard(); }} className="w-10 h-10 rounded-xl flex items-center justify-center border border-white/30 bg-white/15 text-amber-400 hover:bg-white/25 transition-all shadow-sm backdrop-blur-md">
           <Trophy size={20} />
         </button>
 
         <div className="flex items-center gap-2">
-          <button type="button" disabled={level <= 1} onClick={() => level > 1 && setLevel(p => p - 1)} className="w-10 h-10 bg-zinc-900 border border-zinc-600 rounded-xl flex items-center justify-center text-white active:bg-zinc-800 disabled:opacity-35 transition-colors">
+          <button type="button" disabled={level <= 1} onClick={() => level > 1 && setLevel(p => p - 1)} className="w-10 h-10 bg-white/15 border border-white/30 rounded-xl flex items-center justify-center text-slate-900 dark:text-white active:bg-white/25 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md">
             <ChevronLeft size={20} strokeWidth={3} />
           </button>
-          <button type="button" onClick={openLevelBrowser} className="px-6 h-10 bg-white border border-white rounded-xl flex items-center justify-center font-black text-lg tracking-tight text-black hover:bg-slate-200 transition-colors">
+          <button type="button" onClick={openLevelBrowser} className="px-6 h-10 bg-white/25 border border-white/40 rounded-xl flex items-center justify-center font-black text-lg tracking-tight text-slate-900 dark:text-white hover:bg-white/35 transition-all shadow-sm backdrop-blur-md">
             LVL {level}
           </button>
-          <button type="button" disabled={!canAdvanceToLevel(level + 1)} onClick={() => setLevel(p => p + 1)} className="w-10 h-10 bg-zinc-900 border border-zinc-600 rounded-xl flex items-center justify-center text-white active:bg-zinc-800 disabled:opacity-35 transition-colors">
+          <button type="button" disabled={!canAdvanceToLevel(level + 1)} onClick={() => setLevel(p => p + 1)} className="w-10 h-10 bg-white/15 border border-white/30 rounded-xl flex items-center justify-center text-slate-900 dark:text-white active:bg-white/25 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md">
             <ChevronRight size={20} strokeWidth={3} />
           </button>
         </div>
 
-        <button type="button" onClick={() => setShowSettings(true)} className="w-10 h-10 rounded-xl flex items-center justify-center border bg-zinc-900 border-zinc-600 text-slate-100">
+        <button type="button" onClick={() => setShowSettings(true)} className="w-10 h-10 rounded-xl flex items-center justify-center border border-white/30 bg-white/15 text-slate-900 dark:text-white hover:bg-white/25 transition-all shadow-sm backdrop-blur-md">
           <Settings size={20} />
         </button>
       </header>
@@ -1505,7 +1775,23 @@ function NutBoltGame() {
         style={{
           padding: `${BOARD_PADDING}px`,
           gap: `${rowGap}px`,
-          background: '#000000'
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const rawData = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('sourceIdx');
+          const sourceIdx = parseInt(rawData);
+          if (!isNaN(sourceIdx)) {
+            const targetIdx = findTargetBoltForDrop(e.clientX, e.clientY, sourceIdx);
+            if (targetIdx !== null && targetIdx !== sourceIdx) {
+              executeMove(sourceIdx, targetIdx);
+            } else {
+              setSelectedIdx(null);
+            }
+          }
         }}
       >
         {chunkedBolts.map((row, rIdx) => (
@@ -1515,41 +1801,116 @@ function NutBoltGame() {
               const isLocked = checkBoltLock(bolt.nuts);
               const isSelected = selectedIdx === globalIdx;
 
+              const runCount = getTopRunCount(bolt.nuts);
+              const movingNuts = bolt.nuts.slice(bolt.nuts.length - runCount);
+
               return (
                 <div 
                   key={`bolt-${globalIdx}`} 
+                  data-bolt-idx={globalIdx}
                   onClick={() => handleBoltClick(globalIdx)} 
+                  draggable={bolt.nuts.length > 0 && !isLocked}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('sourceIdx', globalIdx.toString());
+                    e.dataTransfer.effectAllowed = 'move';
+                    if (selectedIdx !== globalIdx) {
+                      setSelectedIdx(globalIdx);
+                      playPickup(soundEnabled);
+                    }
+                    const dragPreview = dragPreviewRefs.current[globalIdx];
+                    if (dragPreview) {
+                      e.dataTransfer.setDragImage(dragPreview, dragPreview.offsetWidth / 2, dragPreview.offsetHeight / 2);
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const rawData = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('sourceIdx');
+                    const sourceIdx = parseInt(rawData);
+                    const src = !isNaN(sourceIdx) ? sourceIdx : globalIdx;
+                    const targetIdx = findTargetBoltForDrop(e.clientX, e.clientY, src);
+                    if (targetIdx !== null && targetIdx !== src) {
+                      executeMove(src, targetIdx);
+                    } else {
+                      setSelectedIdx(null);
+                    }
+                  }}
+                  onDragEnd={() => {
+                    setSelectedIdx(null);
+                  }}
+                  onTouchStart={(e) => {
+                    if (bolt.nuts.length === 0 || isLocked) return;
+                    const touch = e.touches[0];
+                    if (!touch) return;
+                    if (selectedIdx !== globalIdx) {
+                      setSelectedIdx(globalIdx);
+                      playPickup(soundEnabled);
+                    }
+                    setTouchDrag({
+                      sourceIdx: globalIdx,
+                      x: touch.clientX,
+                      y: touch.clientY,
+                      movingNuts,
+                    });
+                  }}
+                  onTouchMove={(e) => {
+                    if (!touchDrag) return;
+                    const touch = e.touches[0];
+                    if (touch) {
+                      setTouchDrag(prev => prev ? { ...prev, x: touch.clientX, y: touch.clientY } : null);
+                    }
+                  }}
+                  onTouchEnd={(e) => {
+                    if (!touchDrag) return;
+                    const touch = e.changedTouches[0];
+                    if (touch) {
+                      const targetIdx = findTargetBoltForDrop(touch.clientX, touch.clientY, touchDrag.sourceIdx);
+                      if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx) {
+                        executeMove(touchDrag.sourceIdx, targetIdx);
+                      }
+                    }
+                    setTouchDrag(null);
+                    setSelectedIdx(null);
+                  }}
                   className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform transition-opacity duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isLocked ? 'opacity-60' : ''} ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
                 >
                   {/* Slot guide lines (empty slot indicators) */}
                   <div className="absolute inset-x-0 bottom-3 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[2px]">
                     {Array.from({ length: safeCapacity }).map((_, i) => (
-                      <div key={i} className="w-full border border-dashed border-slate-500/25 rounded bg-slate-500/[0.06]" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
+                      <div key={i} className="w-full border border-dashed border-slate-400/40 rounded-xl bg-slate-400/10 backdrop-blur-[1px]" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
                     ))}
                   </div>
                   
-                  {/* Peg rod (bolt thread) */}
-                  <div className={`absolute bottom-1 rounded-t-full transition-all border ${isLocked ? 'bg-amber-500 border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : isSelected ? 'bg-blue-400 border-blue-200 shadow-[0_0_12px_rgba(96,165,250,0.8)] animate-pulse' : 'bg-slate-400 border-slate-200/50 group-hover:bg-slate-300'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px`, width: `${Math.max(4, boltColWidth * 0.3)}px` }} />
+                  {/* Peg rod (bolt thread) - Frosted Glass Rod with Glow */}
+                  <div className={`absolute bottom-1 rounded-t-2xl transition-all border ${isLocked ? 'bg-amber-400/50 border-amber-200/90 shadow-[0_0_16px_rgba(251,191,36,0.7)]' : isSelected ? 'bg-sky-400/50 border-sky-200/90 shadow-[0_0_20px_rgba(56,189,248,0.8)] animate-pulse' : 'bg-white/30 backdrop-blur-md border-white/60 shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),0_0_14px_rgba(255,255,255,0.25)] group-hover:bg-white/40'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px`, width: `${Math.max(4, boltColWidth * 0.3)}px` }}>
+                    {/* Glass specular sheen line */}
+                    <div className="absolute inset-y-1 left-[25%] w-[25%] rounded-full bg-white blur-[0.5px] pointer-events-none opacity-90" />
+                  </div>
                   
                   {/* Nut stack */}
                   <div className={`absolute inset-x-0 bottom-3 flex flex-col-reverse items-center gap-y-[2px] z-10 pointer-events-none ${justPlacedIdx === globalIdx ? 'animate-nut-land' : ''}`}>
                     {bolt.nuts.map((nut, nIdx) => {
-                      const isTopNut = nIdx === bolt.nuts.length - 1;
                       const isNutRevealed = nut.revealed;
                       
                       const nutType = NUT_TYPES.find(t => t.id === nut.id) || NUT_TYPES[0]; 
                       const Icon = nutType.icon;
+
+                      const isNutBeingDragged = (touchDrag && touchDrag.sourceIdx === globalIdx && nIdx >= bolt.nuts.length - touchDrag.movingNuts.length) || (isSelected && nIdx >= bolt.nuts.length - runCount);
+
                       return (
                         <div 
                           key={nIdx} 
-                          className={`rounded flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.3),inset_0_-3px_5px_rgba(0,0,0,0.35)] transform transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'} ${isSelected && isTopNut ? '-translate-y-3 ring-4 ring-blue-400 ring-offset-1 ring-offset-black scale-110 z-20 shadow-[0_10px_20px_rgba(0,0,0,0.5)]' : ''}`}
+                          className={`rounded-xl flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.4),inset_0_-3px_5px_rgba(0,0,0,0.35),0_4px_8px_rgba(0,0,0,0.25)] transform transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full ${isNutBeingDragged ? 'opacity-0 pointer-events-none' : ''} ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'}`}
                           style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
                         >
                           {isNutRevealed ? (
-                            <Icon size={Math.max(8, Math.min(24, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
+                            <Icon size={Math.max(8, Math.min(28, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
                           ) : (
-                            <div className="text-[10px] font-bold text-zinc-300">?</div>
+                            <div className={`font-bold text-zinc-300 ${nutHeight > 30 ? 'text-sm' : nutHeight > 22 ? 'text-xs' : 'text-[10px]'}`}>?</div>
                           )}
                         </div>
                       );
@@ -1563,20 +1924,67 @@ function NutBoltGame() {
                     )}
                   </div>
                   
-                  {/* Bolt base + lock icon */}
+                  {/* Bolt base + lock icon - Frosted Glass Base */}
                   <div
-                    className={`absolute rounded-full border overflow-hidden transition-colors ${isLocked ? 'bg-gradient-to-b from-yellow-200 via-amber-400 to-amber-600 border-amber-100' : isSelected ? 'bg-gradient-to-b from-blue-200 via-blue-400 to-blue-600 border-blue-100' : 'bg-gradient-to-b from-zinc-100 via-zinc-300 to-zinc-500 border-white/60'}`}
-                    style={{ width: `${boltColWidth * 0.8}px`, height: '18px', bottom: '-4px' }}
+                    className={`absolute rounded-full border overflow-hidden transition-all ${isLocked ? 'bg-gradient-to-b from-yellow-200/90 via-amber-400/90 to-amber-600/90 border-amber-100 shadow-[0_0_12px_rgba(245,158,11,0.5)]' : isSelected ? 'bg-gradient-to-b from-blue-200/90 via-blue-400/90 to-blue-600/90 border-blue-100 shadow-[0_0_12px_rgba(96,165,250,0.6)]' : 'bg-white/25 backdrop-blur-md border-white/60 shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),0_0_16px_rgba(255,255,255,0.2)]'}`}
+                    style={{ width: `${boltColWidth * 0.85}px`, height: '22px', bottom: '-6px' }}
                   >
-                    {/* Gloss highlight — reads as a shine on polished metal rather than a flat tint */}
-                    <div className="absolute inset-x-[10%] top-[14%] h-[30%] rounded-full bg-white/60 blur-[0.5px] pointer-events-none" />
+                    {/* Gloss highlight — polish sheen */}
+                    <div className="absolute inset-x-[10%] top-[10%] h-[40%] rounded-full bg-gradient-to-b from-white to-white/20 pointer-events-none" />
                     {isLocked && <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow z-10"><Lock size={6} strokeWidth={3} /></div>}
+                  </div>
+
+                  {/* Hidden drag preview */}
+                  <div
+                    ref={(el) => { if (el) dragPreviewRefs.current[globalIdx] = el; }}
+                    className="absolute top-[-9999px] left-[-9999px] flex flex-col-reverse items-center gap-y-[2px] drop-shadow-[0_20px_20px_rgba(0,0,0,0.5)] brightness-110"
+                    style={{ width: `${boltColWidth}px` }}
+                  >
+                    {movingNuts.map((nut, idx) => {
+                      const nutType = NUT_TYPES.find(t => t.id === nut.id) || NUT_TYPES[0];
+                      const Icon = nutType.icon;
+                      return (
+                        <div
+                          key={`drag-${idx}`}
+                          className={`rounded-xl flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.3),inset_0_-3px_5px_rgba(0,0,0,0.35)] w-full ${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30`}
+                          style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
+                        >
+                          <Icon size={Math.max(8, Math.min(28, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
             })}
           </div>
         ))}
+
+        {/* Floating Touch Drag Overlay for iOS & Touchscreens */}
+        {touchDrag && (
+          <div
+            className="fixed pointer-events-none z-50 flex flex-col-reverse items-center gap-y-[2px] transform -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_25px_30px_rgba(0,0,0,0.7)] scale-110"
+            style={{
+              left: `${touchDrag.x}px`,
+              top: `${touchDrag.y - 30}px`,
+              width: `${boltColWidth}px`,
+            }}
+          >
+            {touchDrag.movingNuts.map((nut, idx) => {
+              const nutType = NUT_TYPES.find(t => t.id === nut.id) || NUT_TYPES[0];
+              const Icon = nutType.icon;
+              return (
+                <div
+                  key={`touch-drag-${idx}`}
+                  className={`rounded-xl flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.4),inset_0_-3px_5px_rgba(0,0,0,0.35)] w-full ${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30 brightness-110`}
+                  style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
+                >
+                  <Icon size={Math.max(8, Math.min(28, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       {/* END GAME BOARD */}
 
@@ -1584,23 +1992,28 @@ function NutBoltGame() {
       {/* ======================================================
           FOOTER BAR
           Left: Reset button | Center: Undo button | Right: Move/Height stats
+          Grid-3 layout ensures Undo button is mathematically centered
           ====================================================== */}
-      <footer ref={footerRef} className="w-full h-16 px-4 bg-black border-t border-zinc-700 shrink-0 flex items-center justify-between z-35">
-        <button type="button" onClick={handleReset} disabled={moveCount === 0} className="w-11 h-11 rounded-xl flex items-center justify-center border bg-zinc-900 border-zinc-600 text-rose-300 disabled:opacity-35">
-          <RotateCcw size={20} />
-        </button>
-        <button type="button" onClick={handleUndo} disabled={history.length === 0} className="w-12 h-12 rounded-2xl flex items-center justify-center border bg-blue-600 border-blue-400 text-white disabled:bg-zinc-800 disabled:border-zinc-600 disabled:text-slate-300 shadow-xl active:scale-95 transition-all">
-          <Undo2 size={24} strokeWidth={2.5} />
-        </button>
-        <div className="flex items-center gap-2 bg-zinc-900 rounded-xl px-3 py-1.5 border border-zinc-700">
-          <div className="flex flex-col items-center">
-            <span className="text-[8px] text-slate-300 uppercase font-bold">Moves</span>
-            <span className="text-xs font-black text-amber-400">{moveCount}</span>
+      <footer ref={footerRef} className="w-full h-20 px-6 border-t border-white/20 shrink-0 grid grid-cols-3 items-center z-35 bg-white/15 backdrop-blur-xl shadow-sm">
+        <div className="justify-self-start">
+          <button type="button" onClick={handleReset} disabled={moveCount === 0} className="w-14 h-14 rounded-2xl flex items-center justify-center border border-white/30 bg-white/15 text-rose-500 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md">
+            <RotateCcw size={24} />
+          </button>
+        </div>
+        <div className="justify-self-center">
+          <button type="button" onClick={handleUndo} disabled={history.length === 0} className="w-16 h-16 rounded-3xl flex items-center justify-center border border-white/40 bg-white/25 text-slate-900 dark:text-white disabled:bg-white/5 disabled:border-white/10 disabled:text-slate-400 shadow-lg active:scale-95 hover:bg-white/35 transition-all backdrop-blur-md">
+            <Undo2 size={28} strokeWidth={2.5} />
+          </button>
+        </div>
+        <div className="justify-self-end flex items-center gap-3 bg-white/15 rounded-2xl px-4 py-2 border border-white/30 shadow-sm backdrop-blur-md">
+          <div className="flex flex-col items-center min-w-[36px]">
+            <span className="text-[9px] text-slate-700 dark:text-slate-200 uppercase font-bold tracking-wider">Moves</span>
+            <span className="text-sm font-black text-amber-500 dark:text-amber-300">{moveCount}</span>
           </div>
-          <div className="w-[1px] h-5 bg-slate-700" />
-          <div className="flex flex-col items-center">
-            <span className="text-[8px] text-slate-300 uppercase font-bold">Height</span>
-            <span className="text-xs font-black text-sky-400">{currentConfig.capacity}</span>
+          <div className="w-[1px] h-6 bg-white/30" />
+          <div className="flex flex-col items-center min-w-[36px]">
+            <span className="text-[9px] text-slate-700 dark:text-slate-200 uppercase font-bold tracking-wider">Height</span>
+            <span className="text-sm font-black text-sky-500 dark:text-sky-300">{currentConfig.capacity}</span>
           </div>
         </div>
       </footer>
@@ -1712,8 +2125,8 @@ function NutBoltGame() {
                 <Crown size={16} />
                 <h3 className="text-sm font-black uppercase tracking-wider">GLOBAL LEADERBOARD</h3>
               </div>
-              <button type="button" className="text-slate-400 hover:text-white" onClick={() => setShowLeaderboard(false)}>
-                <X size={16} />
+              <button type="button" className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer" onClick={() => setShowLeaderboard(false)}>
+                <X size={16} strokeWidth={2.5} />
               </button>
             </div>
             
@@ -1769,8 +2182,8 @@ function NutBoltGame() {
           <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-[28px] p-5 space-y-4 shadow-2xl">
             <div className="flex justify-between items-center pb-2 border-b border-slate-800">
               <h3 className="text-sm font-black uppercase tracking-wider">PLAYER PROFILE</h3>
-              <button type="button" className="text-slate-400 hover:text-white" onClick={() => { setShowSettings(false); setConfirmWipe(false); }}>
-                <X size={16} />
+              <button type="button" className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer" onClick={() => { setShowSettings(false); setConfirmWipe(false); }}>
+                <X size={16} strokeWidth={2.5} />
               </button>
             </div>
 
@@ -1778,7 +2191,6 @@ function NutBoltGame() {
               // -- Settings default view --
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Edit Tag Name</label>
                   <input 
                     type="text" 
                     maxLength={3} 
@@ -1790,10 +2202,10 @@ function NutBoltGame() {
                 
                 <button 
                   type="button" 
-                  onClick={() => { localStorage.setItem('nb_arcade_name_v7', username); setShowSettings(false); }} 
+                  onClick={() => { safeStorage.setItem('nb_arcade_name_v7', username); setShowSettings(false); }} 
                   className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-xs font-black rounded-xl text-white uppercase tracking-wider transition-colors"
                 >
-                  SAVE SIGNATURE
+                  SAVE NAME
                 </button>
 
                 <div className="flex items-center justify-between pt-1">
@@ -1803,12 +2215,23 @@ function NutBoltGame() {
                     onClick={() => {
                       const next = !soundEnabled;
                       setSoundEnabled(next);
-                      localStorage.setItem('nb_sound_enabled_v1', String(next));
+                      safeStorage.setItem('nb_sound_enabled_v1', String(next));
                     }}
                     className={`w-12 h-6 rounded-full relative transition-colors ${soundEnabled ? 'bg-blue-600' : 'bg-slate-700'}`}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${soundEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${soundEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
                   </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Background Color</label>
+                  <ColorPadPicker
+                    color={bgColor}
+                    onChange={(newColor) => {
+                      setBgColor(newColor);
+                      safeStorage.setItem('nb_bg_color_v1', newColor);
+                    }}
+                  />
                 </div>
                 
                 <div className="pt-4 border-t border-slate-800/60 mt-4 space-y-2">
@@ -1817,14 +2240,14 @@ function NutBoltGame() {
                     onClick={() => window.location.reload()} 
                     className="w-full py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-bold rounded-xl uppercase transition-colors"
                   >
-                    Force Hard Refresh App
+                    Refresh App
                   </button>
                   <button 
                     type="button" 
                     onClick={() => setConfirmWipe(true)} 
                     className="w-full py-2 bg-red-950/40 border border-red-900/40 text-red-400 hover:bg-red-900/20 text-xs font-bold rounded-xl uppercase transition-colors"
                   >
-                    Wipe / Reset Data
+                    Wipe & Reset Data
                   </button>
                 </div>
               </div>
@@ -1869,8 +2292,8 @@ function NutBoltGame() {
           <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-[28px] p-5 max-h-[85%] flex flex-col shadow-2xl">
             <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
               <h3 className="text-sm font-black uppercase tracking-wider">LEVEL SELECTOR</h3>
-              <button type="button" className="text-slate-400 hover:text-white" onClick={() => setShowLevelBrowser(false)}>
-                <X size={16} />
+              <button type="button" className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer" onClick={() => setShowLevelBrowser(false)}>
+                <X size={16} strokeWidth={2.5} />
               </button>
             </div>
 
@@ -1977,7 +2400,7 @@ export default class NutBoltAppWrapper extends React.Component {
           <h2 className="text-2xl font-black mb-4 uppercase tracking-widest text-red-500">System Error</h2>
           <p className="text-sm mb-6 max-w-sm">{this.state.error?.message || "An unexpected rendering fault occurred."}</p>
           <button 
-            onClick={() => { localStorage.clear(); window.location.reload(); }}
+            onClick={() => { safeStorage.clear(); window.location.reload(); }}
             className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-transform uppercase tracking-wider"
           >
             Wipe Storage & Reboot
