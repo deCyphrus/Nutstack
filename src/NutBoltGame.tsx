@@ -678,6 +678,7 @@ function NutBoltGame() {
   const [completedLevelNotice, setCompletedLevelNotice] = useState<number | null>(null);
   const [browserPage, setBrowserPage] = useState(0);
   const [showIntroClearPop, setShowIntroClearPop] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   const [completedLevels, setCompletedLevels] = useState([]);
   const [playerScores, setPlayerScores] = useState({});
@@ -952,22 +953,25 @@ function NutBoltGame() {
     }
   };
 
-  const fetchPlayerSaveFromCloud = async (uname: string) => {
+  const fetchPlayerSaveFromCloud = async (uname: string, showToast = false) => {
     if (!isGlobalLeaderboardEnabled || !supabase || !uname) return;
     try {
       const { data, error } = await supabase
         .from('player_saves')
         .select('*')
         .eq('username', uname)
-        .single();
+        .maybeSingle();
       if (data && !error) {
         if (data.current_level && data.current_level > level) {
           setLevel(data.current_level);
           safeStorage.setItem('nb_current_level_v8', data.current_level.toString());
         }
-        if (Array.isArray(data.completed_levels) && data.completed_levels.length >= completedLevels.length) {
-          setCompletedLevels(data.completed_levels);
-          safeStorage.setItem('nb_completed_levels_v8', JSON.stringify(data.completed_levels));
+        if (Array.isArray(data.completed_levels)) {
+          setCompletedLevels(prev => {
+            const merged = Array.from(new Set([...prev, ...data.completed_levels]));
+            safeStorage.setItem('nb_completed_levels_v8', JSON.stringify(merged));
+            return merged;
+          });
         }
         if (data.level_records && typeof data.level_records === 'object') {
           setLevelRecords(prev => {
@@ -983,9 +987,20 @@ function NutBoltGame() {
             return merged;
           });
         }
+        if (showToast) {
+          setToastMessage(`Cloud save synchronized for [${uname}]!`);
+          setTimeout(() => setToastMessage(null), 3000);
+        }
+      } else if (showToast) {
+        setToastMessage(`No cloud save found for [${uname}] yet.`);
+        setTimeout(() => setToastMessage(null), 3000);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Cloud sync error:', err);
+      if (showToast) {
+        setToastMessage('Cloud sync failed. Check connection.');
+        setTimeout(() => setToastMessage(null), 3000);
+      }
     }
   };
 
@@ -2282,23 +2297,25 @@ function NutBoltGame() {
                   onTouchEnd={(e) => {
                     if (!touchDrag) return;
                     const touch = e.changedTouches[0];
-                    lastTouchTimeRef.current = Date.now();
                     if (touch) {
                       const dist = Math.hypot(touch.clientX - touchDrag.startX, touch.clientY - touchDrag.startY);
+                      const sourceIdx = touchDrag.sourceIdx;
+                      setTouchDrag(null);
+
                       if (dist < 12) {
-                        // It was just a tap without dragging!
-                        setTouchDrag(null);
-                        handleBoltClick(touchDrag.sourceIdx);
-                        return;
-                      }
-                      const targetIdx = findTargetBoltForDrop(touch.clientX, touch.clientY, touchDrag.sourceIdx);
-                      if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx) {
-                        executeMove(touchDrag.sourceIdx, targetIdx);
+                        // Tap: use auto-move logic
+                        handleBoltClick(sourceIdx);
+                        lastTouchTimeRef.current = Date.now();
                       } else {
-                        handleBoltClick(touchDrag.sourceIdx);
+                        // Drag: magnetic drop into the area of a bolt only
+                        const targetIdx = findTargetBoltForDrop(touch.clientX, touch.clientY, sourceIdx);
+                        if (targetIdx !== null && targetIdx !== sourceIdx) {
+                          executeMove(sourceIdx, targetIdx);
+                        }
                       }
+                    } else {
+                      setTouchDrag(null);
                     }
-                    setTouchDrag(null);
                   }}
                   className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform transition-opacity duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isLocked ? 'opacity-60' : ''} ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
@@ -2778,15 +2795,10 @@ function NutBoltGame() {
                 <div className="pt-4 border-t border-white/20 mt-4 space-y-2">
                   <button 
                     type="button" 
-                    onClick={() => { setShowSettings(false); setShowWelcomeModal(true); }} 
-                    className="w-full py-2.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-xs font-bold rounded-2xl uppercase transition-colors border border-sky-400/30 backdrop-blur-md flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Smartphone size={15} />
-                    <span>Home Screen App Guide</span>
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => window.location.reload()} 
+                    onClick={async () => {
+                      await syncPlayerStateToCloud();
+                      window.location.reload();
+                    }} 
                     className="w-full py-2.5 bg-white/15 hover:bg-white/25 text-slate-100 text-xs font-bold rounded-2xl uppercase transition-colors border border-white/20 backdrop-blur-md"
                   >
                     Refresh App
@@ -2988,6 +3000,12 @@ function NutBoltGame() {
         </div>
       )}
       {/* END MODAL: COMPLETED STAGE NOTICE */}
+
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 bg-zinc-900/95 text-amber-300 font-bold text-xs rounded-2xl shadow-2xl border border-amber-400/40 backdrop-blur-xl animate-bounce">
+          {toastMessage}
+        </div>
+      )}
 
     </div>
   );
