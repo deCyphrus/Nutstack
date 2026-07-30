@@ -15,11 +15,6 @@ create policy "Leaderboard is publicly readable"
   on public.leaderboard for select
   using (true);
 
--- This is a nameplate-only arcade leaderboard with no login, so writes
--- are intentionally open: anyone can insert or update any row by
--- username. That's fine for a casual high-score list where the worst
--- case is someone spoofing a 3-letter tag, but do NOT reuse this table
--- or these policies for anything that holds real user data.
 create policy "Anyone can insert a leaderboard row"
   on public.leaderboard for insert
   with check (true);
@@ -50,13 +45,15 @@ create policy "Anyone can update a level record"
   on public.level_records for update
   using (true);
 
--- Player saves (cross-device progress sync per username)
+-- Player saves (cross-device progress and settings sync per username)
 create table if not exists public.player_saves (
   username text primary key,
   current_level integer not null default 1,
   completed_levels jsonb not null default '[]'::jsonb,
   level_records jsonb not null default '{}'::jsonb,
   user_level_scores jsonb not null default '{}'::jsonb,
+  sound_enabled boolean not null default true,
+  bg_color text not null default '#e2e8f0',
   updated_at timestamptz not null default now()
 );
 
@@ -73,4 +70,3 @@ create policy "Anyone can insert player saves"
 create policy "Anyone can update player saves"
   on public.player_saves for update
   using (true);
-
