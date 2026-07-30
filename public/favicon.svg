@@ -1,41 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <defs>
-    <!-- Chunky toy-metal, not realistic - matches your game tiles -->
-    <linearGradient id="nutFill" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="12%" stop-color="#F2F4F7"/>
-      <stop offset="50%" stop-color="#D8DDE6"/>
-      <stop offset="100%" stop-color="#9AA3B2"/>
-    </linearGradient>
-    <!-- Inner hole pop - your signature yellow sun tile -->
-    <radialGradient id="holePop" cx="35%" cy="30%" r="70%">
-      <stop offset="0%" stop-color="#FFE066"/>
-      <stop offset="100%" stop-color="#FFB703"/>
-    </radialGradient>
-  </defs>
-
-  <!-- Tilted for life/energy like your stacked tiles -->
-  <g transform="translate(64 64) rotate(-12)">
-    <!-- Heavy shadow for depth - like your game tiles have -->
-    <path d="M 0 -42 L 36.37 -21 L 36.37 21 L 0 42 L -36.37 21 L -36.37 -21 Z" 
-          fill="#1A1F2B" opacity="0.18" transform="translate(0,6)"/>
-    
-    <!-- Main hex nut - thick, friendly, rounded joins -->
-    <path d="M 0 -40 L 34.64 -20 L 34.64 20 L 0 40 L -34.64 20 L -34.64 -20 Z"
-          fill="url(#nutFill)"
-          stroke="#1E293B"
-          stroke-width="7"
-          stroke-linejoin="round"
-          stroke-linecap="round"/>
-    
-    <!-- Top shine - gives it plastic toy life -->
-    <path d="M 0 -40 L 34.64 -20 L 34.64 -8 L 10 -24 L -10 -24 L -34.64 -8 L -34.64 -20 Z"
-          fill="white" opacity="0.55"/>
-
-    <!-- Inner hole - bold outline for tiny sizes -->
-    <circle cx="0" cy="0" r="17" fill="url(#holePop)" stroke="#1E293B" stroke-width="6.5"/>
-    
-    <!-- Tiny highlight in hole for sparkle -->
-    <circle cx="-4" cy="-4" r="4" fill="white" opacity="0.7"/>
-  </g>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 24.0.2, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 128 128" enable-background="new 0 0 128 128" xml:space="preserve">
+<g transform="translate(64 64) rotate(-12)">
+	<path opacity="0.18" fill="#1A1F2B" enable-background="new    " d="M0.1-54.9L51-25.5l0,58.8L0.1,62.7l-50.9-29.4l0-58.8L0.1-54.9
+		z"/>
+	
+		<linearGradient id="SVGID_1_" gradientUnits="userSpaceOnUse" x1="-585.7505" y1="381.3563" x2="-585.7505" y2="379.9563" gradientTransform="matrix(67.7661 16.633 14.4042 -78.2518 34201.0039 39524.0547)">
+		<stop  offset="0" style="stop-color:#FFFFFF"/>
+		<stop  offset="0.12" style="stop-color:#F2F4F7"/>
+		<stop  offset="0.5" style="stop-color:#D8DDE6"/>
+		<stop  offset="1" style="stop-color:#9AA3B2"/>
+	</linearGradient>
+	<path fill="url(#SVGID_1_)" stroke="#1E293B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" d="M0.1-60.5
+		l48.5,28l0,56l-48.5,28l-48.5-28l0-56L0.1-60.5z"/>
+	<path opacity="0.55" fill="#FFFFFF" enable-background="new    " d="M0.1-60.5l48.5,28l0,16.8L14.1-38.1l-28,0l-34.5,22.4l0-16.8
+		L0.1-60.5z"/>
+	<circle fill="#FF7BF6" stroke="#1E293B" stroke-width="6.5" cx="0.1" cy="-4.5" r="23.8"/>
+	<circle opacity="0.7" fill="#FFFFFF" enable-background="new    " cx="-5.5" cy="-10.1" r="5.6"/>
+</g>
 </svg>
