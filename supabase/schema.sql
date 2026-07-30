@@ -49,3 +49,28 @@ create policy "Anyone can insert a level record"
 create policy "Anyone can update a level record"
   on public.level_records for update
   using (true);
+
+-- Player saves (cross-device progress sync per username)
+create table if not exists public.player_saves (
+  username text primary key,
+  current_level integer not null default 1,
+  completed_levels jsonb not null default '[]'::jsonb,
+  level_records jsonb not null default '{}'::jsonb,
+  user_level_scores jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.player_saves enable row level security;
+
+create policy "Player saves are publicly readable"
+  on public.player_saves for select
+  using (true);
+
+create policy "Anyone can insert player saves"
+  on public.player_saves for insert
+  with check (true);
+
+create policy "Anyone can update player saves"
+  on public.player_saves for update
+  using (true);
+
