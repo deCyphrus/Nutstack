@@ -2284,6 +2284,13 @@ function NutBoltGame() {
                     const touch = e.changedTouches[0];
                     lastTouchTimeRef.current = Date.now();
                     if (touch) {
+                      const dist = Math.hypot(touch.clientX - touchDrag.startX, touch.clientY - touchDrag.startY);
+                      if (dist < 12) {
+                        // It was just a tap without dragging!
+                        setTouchDrag(null);
+                        handleBoltClick(touchDrag.sourceIdx);
+                        return;
+                      }
                       const targetIdx = findTargetBoltForDrop(touch.clientX, touch.clientY, touchDrag.sourceIdx);
                       if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx) {
                         executeMove(touchDrag.sourceIdx, targetIdx);
