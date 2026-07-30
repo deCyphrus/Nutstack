@@ -10,7 +10,7 @@ import {
   Moon, Sun, Cloud, Snowflake, Crown, Music, 
   Zap, ChevronLeft, ChevronRight, Diamond, Gem,
   Flower2, Leaf, Flame, Waves, Mountain, Umbrella, Apple,
-  Anchor, Bell, Cookie, Ghost
+  Anchor, Bell, Cookie, Ghost, Smartphone, Share, PlusSquare, MoreVertical
 } from 'lucide-react';
 import { supabase, isGlobalLeaderboardEnabled } from './lib/supabaseClient';
 import { playPickup, playPlace, playLock, playError, playLevelComplete, playSectionComplete } from './lib/sounds';
@@ -673,6 +673,8 @@ function NutBoltGame() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showLevelBrowser, setShowLevelBrowser] = useState(false);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [completedLevelNotice, setCompletedLevelNotice] = useState<number | null>(null);
   const [browserPage, setBrowserPage] = useState(0);
   const [showIntroClearPop, setShowIntroClearPop] = useState(false);
@@ -765,6 +767,11 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   useEffect(() => {
     try {
+      const savedWelcome = safeStorage.getItem('nb_pwa_welcome_v2');
+      if (!savedWelcome) {
+        setShowWelcomeModal(true);
+      }
+
       const savedName = safeStorage.getItem('nb_arcade_name_v7');
       if (savedName) setUsername(savedName);
       else setShowUsernamePrompt(true);
@@ -837,6 +844,56 @@ function NutBoltGame() {
   }, []);
   // ----------------------------------------------------------
   // END SUB-SECTION: EFFECT — LOCALSTORAGE INITIAL LOAD
+  // ----------------------------------------------------------
+
+
+  // ----------------------------------------------------------
+  // SUB-SECTION: EFFECT — AUTO-UPDATE CHECKER (PWA / Mobile)
+  // Polls /version.json on mount, app focus (visibilitychange),
+  // and every 3 minutes. If a new version is detected, automatically
+  // refreshes the app so mobile users always get latest updates without
+  // needing manual cache clearing.
+  // ----------------------------------------------------------
+  useEffect(() => {
+    let initialVersion: string | null = null;
+
+    const checkForUpdates = async () => {
+      try {
+        const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.version) {
+          if (!initialVersion) {
+            initialVersion = data.version;
+          } else if (initialVersion !== data.version) {
+            setUpdateAvailable(true);
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          }
+        }
+      } catch {
+        // network error ignored
+      }
+    };
+
+    checkForUpdates();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkForUpdates();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    const interval = setInterval(checkForUpdates, 3 * 60 * 1000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(interval);
+    };
+  }, []);
+  // ----------------------------------------------------------
+  // END SUB-SECTION: EFFECT — AUTO-UPDATE CHECKER
   // ----------------------------------------------------------
 
 
@@ -1971,6 +2028,13 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   return (
     <div className="fixed inset-0 text-slate-100 flex flex-col overflow-hidden overscroll-none select-none" style={{ backgroundColor: bgColor, backgroundImage: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.7) 100%)' }}>
+      {/* Update Available Banner */}
+      {updateAvailable && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-2xl border border-emerald-400 font-bold text-xs flex items-center gap-2 animate-bounce">
+          <span>🚀 New update available! Automatically refreshing...</span>
+        </div>
+      )}
+
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes custom-shake {
           0%, 100% { transform: translateX(0); }
@@ -2178,14 +2242,21 @@ function NutBoltGame() {
                   {/* Slot guide lines (empty slot indicators) */}
                   <div className="absolute inset-x-0 bottom-3 flex flex-col-reverse items-center justify-start pointer-events-none gap-y-[2px]">
                     {Array.from({ length: safeCapacity }).map((_, i) => (
-                      <div key={i} className="w-full border border-dashed border-slate-400/40 rounded-xl bg-slate-400/10 backdrop-blur-[1px]" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
+                      <div key={i} className="w-full border border-dashed border-white/20 rounded-xl bg-white/5 backdrop-blur-[1px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.15)]" style={{ height: `${Math.max(1, nutHeight - 2)}px` }} />
                     ))}
                   </div>
                   
-                  {/* Peg rod (bolt thread) - Frosted Glass Rod with Glow */}
-                  <div className={`absolute bottom-1 rounded-t-2xl transition-all border ${isLocked ? 'bg-amber-400/50 border-amber-200/90 shadow-[0_0_16px_rgba(251,191,36,0.7)]' : isSelected ? 'bg-sky-400/50 border-sky-200/90 shadow-[0_0_20px_rgba(56,189,248,0.8)] animate-pulse' : 'bg-white/30 backdrop-blur-md border-white/60 shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),0_0_14px_rgba(255,255,255,0.25)] group-hover:bg-white/40'}`} style={{ height: `${Math.max(1, pegHeight - 4)}px`, width: `${Math.max(4, boltColWidth * 0.3)}px` }}>
+                  {/* Peg rod (bolt thread) - Frosted Metallic Threaded Rod with Specular Sheen */}
+                  <div 
+                    className={`absolute bottom-1 rounded-t-2xl transition-all border overflow-hidden ${isLocked ? 'bg-gradient-to-b from-amber-300/60 via-amber-400/50 to-amber-500/60 border-amber-200/90 shadow-[0_0_20px_rgba(251,191,36,0.8)]' : isSelected ? 'bg-gradient-to-b from-sky-300/60 via-sky-400/50 to-sky-500/60 border-sky-200/90 shadow-[0_0_22px_rgba(56,189,248,0.85)] animate-pulse' : 'bg-white/30 backdrop-blur-md border-white/60 shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),0_0_14px_rgba(255,255,255,0.25)] group-hover:bg-white/40'}`} 
+                    style={{ 
+                      height: `${Math.max(1, pegHeight - 4)}px`, 
+                      width: `${Math.max(4, boltColWidth * 0.3)}px`,
+                      backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.2) 0px, rgba(255,255,255,0.2) 2px, transparent 2px, transparent 6px)',
+                    }}
+                  >
                     {/* Glass specular sheen line */}
-                    <div className="absolute inset-y-1 left-[25%] w-[25%] rounded-full bg-white blur-[0.5px] pointer-events-none opacity-90" />
+                    <div className="absolute inset-y-1 left-[20%] w-[25%] rounded-full bg-white blur-[0.5px] pointer-events-none opacity-90" />
                   </div>
                   
                   {/* Nut stack */}
@@ -2201,9 +2272,11 @@ function NutBoltGame() {
                       return (
                         <div 
                           key={nIdx} 
-                          className={`rounded-xl flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.4),inset_0_-3px_5px_rgba(0,0,0,0.35),0_4px_8px_rgba(0,0,0,0.25)] transform transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full ${isNutBeingDragged ? 'opacity-0 pointer-events-none' : ''} ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'}`}
+                          className={`rounded-xl flex flex-col items-center justify-center border-b-2 relative shadow-[inset_0_2px_1px_rgba(255,255,255,0.45),inset_0_-3px_5px_rgba(0,0,0,0.35),0_4px_8px_rgba(0,0,0,0.3)] transform transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full ${isNutBeingDragged ? 'opacity-0 pointer-events-none' : ''} ${isNutRevealed ? `${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30` : 'bg-zinc-800 border-zinc-950 border-b-black text-zinc-300'}`}
                           style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
                         >
+                          <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-full bg-black/25 pointer-events-none" />
+                          <div className="absolute right-1.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-full bg-black/25 pointer-events-none" />
                           {isNutRevealed ? (
                             <Icon size={Math.max(8, Math.min(28, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
                           ) : (
@@ -2221,9 +2294,9 @@ function NutBoltGame() {
                     )}
                   </div>
                   
-                  {/* Bolt base + lock icon - Frosted Glass Base */}
+                  {/* Bolt base + lock icon - Frosted 3D Metallic Glass Stand */}
                   <div
-                    className={`absolute rounded-full border overflow-hidden transition-all ${isLocked ? 'bg-gradient-to-b from-yellow-200/90 via-amber-400/90 to-amber-600/90 border-amber-100 shadow-[0_0_12px_rgba(245,158,11,0.5)]' : isSelected ? 'bg-gradient-to-b from-blue-200/90 via-blue-400/90 to-blue-600/90 border-blue-100 shadow-[0_0_12px_rgba(96,165,250,0.6)]' : 'bg-white/25 backdrop-blur-md border-white/60 shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),0_0_16px_rgba(255,255,255,0.2)]'}`}
+                    className={`absolute rounded-full border overflow-hidden transition-all ${isLocked ? 'bg-gradient-to-b from-yellow-200/90 via-amber-400/90 to-amber-600/90 border-amber-100 shadow-[0_0_16px_rgba(245,158,11,0.6)]' : isSelected ? 'bg-gradient-to-b from-sky-200/90 via-sky-400/90 to-sky-600/90 border-sky-100 shadow-[0_0_16px_rgba(56,189,248,0.7)]' : 'bg-gradient-to-b from-white/35 via-white/20 to-white/10 backdrop-blur-md border-white/60 shadow-[inset_0_1.5px_2px_rgba(255,255,255,0.9),0_4px_12px_rgba(0,0,0,0.3)]'}`}
                     style={{ width: `${boltColWidth * 0.85}px`, height: '22px', bottom: '-6px' }}
                   >
                     {/* Gloss highlight — polish sheen */}
@@ -2273,9 +2346,11 @@ function NutBoltGame() {
               return (
                 <div
                   key={`touch-drag-${idx}`}
-                  className={`rounded-xl flex flex-col items-center justify-center border-b-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.4),inset_0_-3px_5px_rgba(0,0,0,0.35)] w-full ${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30 brightness-110`}
+                  className={`rounded-xl flex flex-col items-center justify-center border-b-2 relative shadow-[inset_0_2px_1px_rgba(255,255,255,0.5),inset_0_-3px_6px_rgba(0,0,0,0.4)] w-full ${nutType.bg} ${nutType.border} ${nutType.iconText} border-black/30 brightness-110`}
                   style={{ height: `${Math.max(1, nutHeight - 2)}px` }}
                 >
+                  <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-full bg-black/25 pointer-events-none" />
+                  <div className="absolute right-1.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-full bg-black/25 pointer-events-none" />
                   <Icon size={Math.max(8, Math.min(28, nutHeight * 0.55))} className="drop-shadow-md" strokeWidth={3} />
                 </div>
               );
@@ -2418,7 +2493,7 @@ function NutBoltGame() {
           Shown on first launch when no saved name exists.
           Collects a 4-letter player tag for the leaderboard.
           ====================================================== */}
-      {showUsernamePrompt && (
+      {showUsernamePrompt && !showWelcomeModal && (
         <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-[60] animate-in fade-in duration-150">
           <div className="w-full max-w-xs bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 text-center space-y-4 shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white">
             <h2 className="text-xl font-black uppercase tracking-tight drop-shadow-sm">Welcome, Pilot!</h2>
@@ -2444,6 +2519,73 @@ function NutBoltGame() {
         </div>
       )}
       {/* END MODAL: USERNAME PROMPT */}
+
+
+      {/* ======================================================
+          MODAL: WELCOME & MOBILE APP / HOMESCREEN GUIDE
+          Shown on first launch to remind mobile players to open in Safari/Chrome
+          and add to Home Screen for the full-screen app experience.
+          ====================================================== */}
+      {showWelcomeModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xl flex items-center justify-center p-4 z-[70] animate-in fade-in duration-200">
+          <div className="w-full max-w-xs sm:max-w-sm bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-5 sm:p-6 text-center space-y-4 shadow-[0_25px_60px_rgba(0,0,0,0.45)] text-white animate-in fade-in zoom-in-95 duration-200 overflow-hidden relative">
+            <div className="w-14 h-14 bg-gradient-to-tr from-sky-500/30 via-amber-400/30 to-purple-500/30 border border-white/40 rounded-2xl flex items-center justify-center mx-auto text-amber-300 shadow-lg backdrop-blur-md">
+              <Smartphone size={28} className="drop-shadow" />
+            </div>
+
+            <div className="space-y-1">
+              <h2 className="text-xl font-black text-amber-300 uppercase tracking-tight drop-shadow-sm">Welcome to Nut & Bolt Stack!</h2>
+              <p className="text-xs text-slate-100 font-medium leading-relaxed">
+                For the best full-screen arcade experience with zero browser bars:
+              </p>
+            </div>
+
+            <div className="bg-black/25 rounded-2xl p-3 border border-white/15 text-left space-y-3 text-xs backdrop-blur-md">
+              {/* iPhone / Safari section */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 font-black text-sky-300 uppercase text-[11px] tracking-wider">
+                  <Share size={13} className="text-sky-300" />
+                  <span>iPhone / iPad (Safari)</span>
+                </div>
+                <ol className="list-decimal list-inside text-[11px] text-slate-200 space-y-0.5 pl-1 leading-tight font-medium">
+                  <li>Open in <strong className="text-white">Safari</strong> browser</li>
+                  <li>Tap the <strong className="text-sky-200">Share</strong> button at bottom</li>
+                  <li>Tap <strong className="text-amber-200">Add to Home Screen</strong> (<PlusSquare size={11} className="inline-block mx-0.5 text-amber-300" />)</li>
+                </ol>
+              </div>
+
+              {/* Android / Chrome section */}
+              <div className="border-t border-white/10 pt-2 space-y-1">
+                <div className="flex items-center gap-1.5 font-black text-emerald-300 uppercase text-[11px] tracking-wider">
+                  <MoreVertical size={13} className="text-emerald-300" />
+                  <span>Android (Chrome)</span>
+                </div>
+                <ol className="list-decimal list-inside text-[11px] text-slate-200 space-y-0.5 pl-1 leading-tight font-medium">
+                  <li>Open in <strong className="text-white">Chrome</strong> browser</li>
+                  <li>Tap the <strong className="text-emerald-200">Menu (⋮)</strong> at top right</li>
+                  <li>Tap <strong className="text-emerald-200">Add to Home screen</strong></li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="p-2 bg-amber-400/15 border border-amber-300/30 rounded-xl text-[10px] text-amber-100 font-semibold leading-tight">
+              ✨ Added to Home Screen already? You're all set!
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                safeStorage.setItem('nb_pwa_welcome_v2', 'true');
+                setShowWelcomeModal(false);
+              }}
+              className="w-full py-3.5 bg-gradient-to-r from-blue-600 via-sky-600 to-blue-600 hover:brightness-110 font-black text-xs rounded-2xl uppercase tracking-wider border border-blue-400/40 backdrop-blur-md shadow-lg active:scale-98 transition-transform text-white cursor-pointer"
+            >
+              GOT IT, LET'S PLAY!
+            </button>
+          </div>
+        </div>
+      )}
+      {/* END MODAL: WELCOME & MOBILE APP HOMESCREEN GUIDE */}
 
 
       {/* ======================================================
@@ -2570,6 +2712,14 @@ function NutBoltGame() {
                 </div>
                 
                 <div className="pt-4 border-t border-white/20 mt-4 space-y-2">
+                  <button 
+                    type="button" 
+                    onClick={() => { setShowSettings(false); setShowWelcomeModal(true); }} 
+                    className="w-full py-2.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-xs font-bold rounded-2xl uppercase transition-colors border border-sky-400/30 backdrop-blur-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Smartphone size={15} />
+                    <span>Home Screen App Guide</span>
+                  </button>
                   <button 
                     type="button" 
                     onClick={() => window.location.reload()} 
