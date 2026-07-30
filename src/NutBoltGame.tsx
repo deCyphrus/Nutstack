@@ -952,9 +952,68 @@ function NutBoltGame() {
     }
   };
 
+  const fetchPlayerSaveFromCloud = async (uname: string) => {
+    if (!isGlobalLeaderboardEnabled || !supabase || !uname) return;
+    try {
+      const { data, error } = await supabase
+        .from('player_saves')
+        .select('*')
+        .eq('username', uname)
+        .single();
+      if (data && !error) {
+        if (data.current_level && data.current_level > level) {
+          setLevel(data.current_level);
+          safeStorage.setItem('nb_current_level_v8', data.current_level.toString());
+        }
+        if (Array.isArray(data.completed_levels) && data.completed_levels.length >= completedLevels.length) {
+          setCompletedLevels(data.completed_levels);
+          safeStorage.setItem('nb_completed_levels_v8', JSON.stringify(data.completed_levels));
+        }
+        if (data.level_records && typeof data.level_records === 'object') {
+          setLevelRecords(prev => {
+            const merged = { ...prev, ...data.level_records };
+            safeStorage.setItem('nb_level_records_v1', JSON.stringify(merged));
+            return merged;
+          });
+        }
+        if (data.user_level_scores && typeof data.user_level_scores === 'object') {
+          setUserLevelScores(prev => {
+            const merged = { ...prev, ...data.user_level_scores };
+            safeStorage.setItem('nb_user_level_scores_v1', JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const syncPlayerStateToCloud = () => {
+    if (!isGlobalLeaderboardEnabled || !supabase || !username) return;
+    supabase.from('player_saves').upsert({
+      username,
+      current_level: level,
+      completed_levels: completedLevels,
+      level_records: levelRecords,
+      user_level_scores: userLevelScores,
+      updated_at: new Date().toISOString(),
+    }).then();
+  };
+
+  useEffect(() => {
+    if (isInitialLoadDone && username) {
+      syncPlayerStateToCloud();
+    }
+  }, [completedLevels, level, levelRecords, userLevelScores, username, isInitialLoadDone]);
+
   useEffect(() => {
     fetchGlobalLeaderboard();
     fetchGlobalLevelRecords();
+    const savedName = safeStorage.getItem('nb_arcade_name_v7');
+    if (savedName) {
+      fetchPlayerSaveFromCloud(savedName);
+    }
   }, []);
   // ----------------------------------------------------------
   // END SUB-SECTION: GLOBAL LEADERBOARD SYNC (Supabase)
@@ -1133,6 +1192,7 @@ function NutBoltGame() {
     setUsername(finalName);
     safeStorage.setItem('nb_arcade_name_v7', finalName);
     setShowUsernamePrompt(false);
+    fetchPlayerSaveFromCloud(finalName);
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: USERNAME SUBMIT HANDLER
@@ -2224,11 +2284,8 @@ function NutBoltGame() {
                     const touch = e.changedTouches[0];
                     lastTouchTimeRef.current = Date.now();
                     if (touch) {
-                      const startX = touchDrag.startX ?? touchDrag.x;
-                      const startY = touchDrag.startY ?? touchDrag.y;
-                      const dist = Math.hypot(touch.clientX - startX, touch.clientY - startY);
                       const targetIdx = findTargetBoltForDrop(touch.clientX, touch.clientY, touchDrag.sourceIdx);
-                      if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx && dist > 18) {
+                      if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx) {
                         executeMove(touchDrag.sourceIdx, targetIdx);
                       } else {
                         handleBoltClick(touchDrag.sourceIdx);
