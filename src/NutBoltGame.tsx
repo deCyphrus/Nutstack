@@ -987,6 +987,14 @@ function NutBoltGame() {
             return merged;
           });
         }
+        if (typeof data.sound_enabled === 'boolean') {
+          setSoundEnabled(data.sound_enabled);
+          safeStorage.setItem('nb_sound_enabled_v1', String(data.sound_enabled));
+        }
+        if (data.bg_color) {
+          setBgColor(data.bg_color);
+          safeStorage.setItem('nb_bg_color_v1', data.bg_color);
+        }
         if (showToast) {
           setToastMessage(`Cloud save synchronized for [${uname}]!`);
           setTimeout(() => setToastMessage(null), 3000);
@@ -1012,6 +1020,8 @@ function NutBoltGame() {
       completed_levels: completedLevels,
       level_records: levelRecords,
       user_level_scores: userLevelScores,
+      sound_enabled: soundEnabled,
+      bg_color: bgColor,
       updated_at: new Date().toISOString(),
     }).then();
   };
@@ -1020,7 +1030,7 @@ function NutBoltGame() {
     if (isInitialLoadDone && username) {
       syncPlayerStateToCloud();
     }
-  }, [completedLevels, level, levelRecords, userLevelScores, username, isInitialLoadDone]);
+  }, [completedLevels, level, levelRecords, userLevelScores, username, isInitialLoadDone, soundEnabled, bgColor]);
 
   useEffect(() => {
     fetchGlobalLeaderboard();
