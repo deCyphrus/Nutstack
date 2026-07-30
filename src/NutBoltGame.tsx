@@ -1,10 +1,11 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 // ============================================================
 // SECTION: IMPORTS
 // ============================================================
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Trophy, Undo2, RotateCcw, Lock, Settings, X,
+  Trophy, Undo2, RotateCcw, Lock, Settings, X, CheckCircle2,
   Circle, Square, Triangle, Hexagon, Star, Heart, 
   Moon, Sun, Cloud, Snowflake, Crown, Music, 
   Zap, ChevronLeft, ChevronRight, Diamond, Gem,
@@ -14,9 +15,9 @@ import {
 import { supabase, isGlobalLeaderboardEnabled } from './lib/supabaseClient';
 import { playPickup, playPlace, playLock, playError, playLevelComplete, playSectionComplete } from './lib/sounds';
 const safeStorage = {
-  getItem: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
-  setItem: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
-  clear: () => { try { localStorage.clear(); } catch (e) {} }
+  getItem: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  setItem: (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+  clear: () => { try { localStorage.clear(); } catch { /* ignore */ } }
 };
 
 // ============================================================
@@ -115,9 +116,9 @@ function hexToLab(hex) {
   const toLinear = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
   r = toLinear(r); g = toLinear(g); b = toLinear(b);
   // sRGB -> XYZ (D65 white point) -> Lab
-  let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
-  let y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 1.0;
-  let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
+  const x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
+  const y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 1.0;
+  const z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
   const f = t => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
   const fx = f(x), fy = f(y), fz = f(z);
   return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
@@ -154,7 +155,7 @@ function clashesWithAny(id, chosenIds, threshold = CLASH_THRESHOLD) {
 //   total ≤ 6          → 1 row
 //   total 7–14         → 2 rows
 //   total ≥ 15         → 3 rows
-function getTargetRowCount(totalBolts, capacity) {
+function getTargetRowCount(totalBolts) {
   if (totalBolts <= 6) return 1;
   if (totalBolts <= 12) return 2;
   return 3;
@@ -240,17 +241,22 @@ function getRevealCapacityForLevel(level) {
 const RARE_ACCENTS = ['dark-teal', 'light-violet', 'dark-pink', 'light-teal', 'dark-violet'];
 const RARE_ACCENT_CHANCE = 1 / 6;
 
+// Change this salt value if you ever want to re-seed and generate a fresh set of puzzle layouts for all levels
+const LEVEL_SEED_SALT = 8888;
+
 function choosePaletteIds(level, colors, tutorialIds, bgHex = null) {
   if (tutorialIds) return tutorialIds;
+
+  const levelKey = level + LEVEL_SEED_SALT;
 
   // Deterministic per-level shuffle drawing from the *entire* 26-colour
   // catalogue (not a fixed small pool), so levels get real variety
   // instead of recycling the same handful of colours forever.
-  let candidates = seededAdvancedShuffle(NUT_TYPES.map(t => t.id), level * 151 + 31, 2);
+  let candidates = seededAdvancedShuffle(NUT_TYPES.map(t => t.id), levelKey * 151 + 31, 2);
 
   // Roughly one level in six, try to lead with a rare accent colour.
-  if (seededRandom(level * 47 + 5) < RARE_ACCENT_CHANCE) {
-    const accent = RARE_ACCENTS[Math.floor(seededRandom(level * 89 + 13) * RARE_ACCENTS.length)];
+  if (seededRandom(levelKey * 47 + 5) < RARE_ACCENT_CHANCE) {
+    const accent = RARE_ACCENTS[Math.floor(seededRandom(levelKey * 89 + 13) * RARE_ACCENTS.length)];
     candidates = [accent, ...candidates.filter(id => id !== accent)];
   }
 
@@ -303,6 +309,18 @@ function getNormalCapacity(level, previousCapacity, isDuplicate) {
   const candidates = isDuplicate ? allowed.filter(capacity => capacity >= 5) : allowed;
   return candidates[Math.floor(seededRandom(level * 283 + previousCapacity) * candidates.length)];
 }
+
+function getLevelPar(config) {
+  if (!config) return 15;
+  const baseNuts = (config.activeBolts || 3) * (config.capacity || 4);
+  const scrambleAdj = (config.scramblePairs || 1) * 3.5;
+  const duplicateAdj = (config.duplicateStacks || 0) * 4;
+  const hiddenAdj = (config.hiddenActiveCount || 0) * 2;
+  const capacityFactor = Math.max(1, config.capacity - 2) * 1.2;
+  
+  const estimatedPar = Math.round(baseNuts * 0.9 + scrambleAdj + duplicateAdj + hiddenAdj + capacityFactor);
+  return Math.max(8, estimatedPar);
+}
 // ============================================================
 // END SECTION: LEVEL PROGRESSION / VARIATION HELPERS
 // ============================================================
@@ -316,6 +334,8 @@ function getNormalCapacity(level, previousCapacity, isDuplicate) {
 function generateDeterministicLevelConfig(level, bgHex = null) {
   const cacheKey = `${level}-${bgHex || 'default'}`;
   if (_levelConfigCache[cacheKey]) return _levelConfigCache[cacheKey];
+
+  const levelKey = level + LEVEL_SEED_SALT;
 
   const tutorial = TUTORIAL_CONFIGS[level];
   const earlyOverride = EARLY_LEVEL_OVERRIDES[level];
@@ -335,7 +355,7 @@ function generateDeterministicLevelConfig(level, bgHex = null) {
     : earlyOverride
       ? [earlyOverride.totalBolts, earlyOverride.totalBolts]
       : TOTAL_BOLT_RANGES[capacity];
-  const totalBolts = minTotal + Math.floor(seededRandom(level * 997 + capacity) * (maxTotal - minTotal + 1));
+  const totalBolts = minTotal + Math.floor(seededRandom(levelKey * 997 + capacity) * (maxTotal - minTotal + 1));
   const emptyBolts = 2;
   const activeBolts = totalBolts - emptyBolts;
   const duplicateStacks = tutorial
@@ -343,7 +363,7 @@ function generateDeterministicLevelConfig(level, bgHex = null) {
     : earlyOverride
       ? earlyOverride.duplicateStacks
     : isDoubleColor
-      ? 1 + Math.floor(seededRandom(level * 571) * Math.min(3, Math.floor(activeBolts * 0.4)))
+      ? 1 + Math.floor(seededRandom(levelKey * 571) * Math.min(3, Math.floor(activeBolts * 0.4)))
       : 0;
   const colors = tutorial ? tutorial.colors : activeBolts - duplicateStacks;
   const rows = getTargetRowCount(totalBolts, capacity);
@@ -354,8 +374,8 @@ function generateDeterministicLevelConfig(level, bgHex = null) {
   const colorIds = choosePaletteIds(level, colors, tutorial?.colorIds, bgHex);
   const duplicateColorIds = duplicateStacks === 0
     ? []
-    : seededAdvancedShuffle(colorIds, level * 613, 2).slice(0, duplicateStacks);
-  const stackColorIds = seededAdvancedShuffle([...colorIds, ...duplicateColorIds], level * 719, 3);
+    : seededAdvancedShuffle(colorIds, levelKey * 613, 2).slice(0, duplicateStacks);
+  const stackColorIds = seededAdvancedShuffle([...colorIds, ...duplicateColorIds], levelKey * 719, 3);
   const scramblePairs = tutorial
     ? Math.min(Math.floor(activeBolts / 2), Math.max(1, level - 1))
     : earlyOverride
@@ -367,7 +387,7 @@ function generateDeterministicLevelConfig(level, bgHex = null) {
     duplicateStacks, isRevealLevel: revealThisLevel || tutorial?.hiddenActiveCount > 0,
     isDoubleColor, hiddenActiveCount, rows, rowSizes, colorIds, stackColorIds,
     scramblePairs, solutionMoveUpperBound: scramblePairs * 4,
-    generationSeed: level * 999,
+    generationSeed: levelKey * 999,
   };
   assertLevelConfig(config, previous);
   _levelConfigCache[cacheKey] = config;
@@ -451,60 +471,118 @@ export function validateGeneratedLevels(levelCount = 100) {
 // ============================================================
 // SECTION: 2D COLOR PAD PICKER COMPONENT
 // Single-pad color picker: X = Hue (0-360°), Y = Brightness/Shade.
-// Includes visual target reticle and mobile touch prevention.
+// Includes visual target reticle, sync on open/change, and mobile touch prevention.
 // ============================================================
-function hslToHex(h, s, l) {
+function hslToHex(h: number, s: number, l: number) {
   l /= 100;
   const a = (s * Math.min(l, 1 - l)) / 100;
-  const f = (n) => {
+  const f = (n: number) => {
     const k = (n + h / 30) % 12;
-    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * color)
+    const c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * c)
       .toString(16)
       .padStart(2, '0');
   };
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-function ColorPadPicker({ color, onChange }) {
-  const padRef = useRef(null);
+function hexToHsl(hex: string) {
+  let c = (hex || '#e2e8f0').replace('#', '');
+  if (c.length === 3) c = c.split('').map(x => x + x).join('');
+  const num = parseInt(c, 16);
+  if (isNaN(num)) return { h: 210, s: 40, l: 90 };
+  const r = ((num >> 16) & 255) / 255;
+  const g = ((num >> 8) & 255) / 255;
+  const b = (num & 255) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+function ColorPadPicker({ color, onChange }: { color: string; onChange: (hex: string) => void }) {
+  const padRef = useRef<HTMLDivElement>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [marker, setMarker] = useState({ x: 50, y: 50 }); // % coordinates for target ring
+  const isDraggingRef = useRef(false);
 
-  const handlePointer = (e) => {
+  // Sync marker position with current color whenever isOpen becomes true or color changes externally
+  useEffect(() => {
+    if (isDraggingRef.current) return;
+    const { h, l } = hexToHsl(color);
+    const x = Math.max(0, Math.min(100, (h / 360) * 100));
+    const y = Math.max(0, Math.min(100, (1 - l / 100) * 100));
+    setMarker({ x, y });
+  }, [color, isOpen]);
+
+  const updateFromPointer = (clientX: number, clientY: number) => {
     if (!padRef.current) return;
     const rect = padRef.current.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
     const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
 
-    // Update selection ring position
     setMarker({ x: x * 100, y: y * 100 });
 
     const hue = Math.round(x * 360);
-    // Y: 0 (top) = 100% lightness (pure white), Y: 1 (bottom) = 0% lightness (pure black)
     const lightness = Math.round((1 - y) * 100);
-
     const newHex = hslToHex(hue, 80, lightness);
     onChange(newHex);
   };
 
-  const handleMouseDown = (e) => {
-    handlePointer(e);
-    const onMove = (me) => handlePointer(me);
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+  const getPointerCoords = (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
+    const touchEv = e as unknown as TouchEvent;
+    if (touchEv.touches && touchEv.touches.length > 0) {
+      return { clientX: touchEv.touches[0].clientX, clientY: touchEv.touches[0].clientY };
+    }
+    if (touchEv.changedTouches && touchEv.changedTouches.length > 0) {
+      return { clientX: touchEv.changedTouches[0].clientX, clientY: touchEv.changedTouches[0].clientY };
+    }
+    const mouseEv = e as unknown as MouseEvent;
+    return { clientX: mouseEv.clientX, clientY: mouseEv.clientY };
   };
 
-  const handleTouch = (e) => {
-    if (e.cancelable) e.preventDefault();
-    handlePointer(e);
+  const handlePointerStart = (e: React.MouseEvent | React.TouchEvent) => {
+    if (e.cancelable && e.type.startsWith('touch')) {
+      e.preventDefault();
+    }
+    isDraggingRef.current = true;
+    const { clientX, clientY } = getPointerCoords(e);
+    updateFromPointer(clientX, clientY);
+
+    const handlePointerMove = (me: MouseEvent | TouchEvent) => {
+      if (!isDraggingRef.current) return;
+      if (me.cancelable && me.type.startsWith('touch')) me.preventDefault();
+      const coords = getPointerCoords(me);
+      updateFromPointer(coords.clientX, coords.clientY);
+    };
+
+    const handlePointerEnd = () => {
+      isDraggingRef.current = false;
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerEnd);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerEnd);
+      window.removeEventListener('touchcancel', handlePointerEnd);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerEnd);
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('touchend', handlePointerEnd);
+    window.addEventListener('touchcancel', handlePointerEnd);
   };
 
   return (
@@ -521,7 +599,7 @@ function ColorPadPicker({ color, onChange }) {
 
       {/* Pop-over 2D Pad */}
       {isOpen && (
-        <div className="absolute right-0 top-9 z-50 p-3 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col items-center space-y-2 animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute right-0 top-9 z-50 p-3 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col items-center space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
           <div className="flex justify-between items-center w-full px-1 gap-4">
             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Drag to select</span>
             <button
@@ -535,9 +613,8 @@ function ColorPadPicker({ color, onChange }) {
 
           <div
             ref={padRef}
-            onMouseDown={handleMouseDown}
-            onTouchStart={handleTouch}
-            onTouchMove={handleTouch}
+            onMouseDown={handlePointerStart}
+            onTouchStart={handlePointerStart}
             className="w-48 h-36 rounded-xl cursor-crosshair relative overflow-hidden border border-white/20 touch-none shadow-inner select-none"
             style={{
               background: `
@@ -565,6 +642,9 @@ function ColorPadPicker({ color, onChange }) {
     </div>
   );
 }
+// ============================================================
+// END SECTION: 2D COLOR PAD PICKER COMPONENT
+// ============================================================
 
 
 // ============================================================
@@ -586,16 +666,20 @@ function NutBoltGame() {
   const [history, setHistory] = useState([]);
   const [moveCount, setMoveCount] = useState(0);
   const [undoCount, setUndoCount] = useState(0);
-  const [username, setUsername] = useState('AAA');
+  const [resetsUsed, setResetsUsed] = useState(0);
+  const [levelRecords, setLevelRecords] = useState<{ [lvl: number]: number }>({});
+  const [username, setUsername] = useState('AAAA');
   
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showLevelBrowser, setShowLevelBrowser] = useState(false);
+  const [completedLevelNotice, setCompletedLevelNotice] = useState<number | null>(null);
   const [browserPage, setBrowserPage] = useState(0);
   const [showIntroClearPop, setShowIntroClearPop] = useState(false);
   
   const [completedLevels, setCompletedLevels] = useState([]);
   const [playerScores, setPlayerScores] = useState({});
+  const [userLevelScores, setUserLevelScores] = useState<{ [lvl: number]: number }>({});
   const [confirmWipe, setConfirmWipe] = useState(false);
 
   const [showUsernamePrompt, setShowUsernamePrompt] = useState(false);
@@ -604,13 +688,14 @@ function NutBoltGame() {
 
   const [touchDrag, setTouchDrag] = useState<{
     sourceIdx: number;
+    startX?: number;
+    startY?: number;
     x: number;
     y: number;
     movingNuts: Nut[];
   } | null>(null);
 
   const [bgColor, setBgColor] = useState('#e2e8f0');
-  const derivedHeaderColor = `color-mix(in srgb, ${bgColor}, #ffffff 6%)`;
 
   const currentConfig = generateDeterministicLevelConfig(level, bgColor);
   
@@ -632,6 +717,7 @@ function NutBoltGame() {
   const footerRef = useRef(null);
   const dragPreviewRefs = useRef({});
   const lastSoundPlayedLevelRef = useRef(null);
+  const lastTouchTimeRef = useRef(0);
   // ----------------------------------------------------------
   // END SUB-SECTION: STATE DECLARATIONS
   // ----------------------------------------------------------
@@ -697,6 +783,35 @@ function NutBoltGame() {
         setCompletedLevels(Array.isArray(parsed) ? parsed : []);
       }
 
+      const savedRecords = safeStorage.getItem('nb_level_records_v1');
+      if (savedRecords) {
+        try {
+          const parsed = JSON.parse(savedRecords);
+          if (parsed && typeof parsed === 'object') {
+            const validRecords: { [lvl: number]: number } = {};
+            for (const k in parsed) {
+              const numVal = Number(parsed[k]);
+              if (numVal > 0) validRecords[Number(k)] = numVal;
+            }
+            setLevelRecords(validRecords);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const savedUserScores = safeStorage.getItem('nb_user_level_scores_v1');
+      if (savedUserScores) {
+        try {
+          const parsed = JSON.parse(savedUserScores);
+          if (parsed && typeof parsed === 'object') {
+            setUserLevelScores(parsed);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
       const savedCurrentLevel = safeStorage.getItem('nb_current_level_v8');
       if (savedCurrentLevel) {
         const parsedLevel = parseInt(savedCurrentLevel, 10);
@@ -734,6 +849,29 @@ function NutBoltGame() {
   // each time the leaderboard modal is opened, so it's reasonably fresh
   // without polling constantly.
   // ----------------------------------------------------------
+  const fetchGlobalLevelRecords = async () => {
+    if (!isGlobalLeaderboardEnabled || !supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from('level_records')
+        .select('level, record_moves');
+      if (error) throw error;
+      if (!data) return;
+      setLevelRecords(prev => {
+        const merged = { ...prev };
+        for (const row of data) {
+          if (row.record_moves > 0 && (merged[row.level] === undefined || merged[row.level] <= 0 || row.record_moves < merged[row.level])) {
+            merged[row.level] = row.record_moves;
+          }
+        }
+        safeStorage.setItem('nb_level_records_v1', JSON.stringify(merged));
+        return merged;
+      });
+    } catch (err) {
+      console.warn('Global level records fetch failed, showing local data only:', err);
+    }
+  };
+
   const fetchGlobalLeaderboard = async () => {
     if (!isGlobalLeaderboardEnabled || !supabase) return;
     try {
@@ -759,6 +897,7 @@ function NutBoltGame() {
 
   useEffect(() => {
     fetchGlobalLeaderboard();
+    fetchGlobalLevelRecords();
   }, []);
   // ----------------------------------------------------------
   // END SUB-SECTION: GLOBAL LEADERBOARD SYNC (Supabase)
@@ -877,7 +1016,7 @@ function NutBoltGame() {
     try {
       if (!isClear) {
         const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
-        unfinished[`stage_${level}`] = { bolts, history, moveCount, undoCount };
+        unfinished[`stage_${level}`] = { bolts, history, moveCount, undoCount, resetsUsed };
         safeStorage.setItem('nb_unfinished_snapshots_v8', JSON.stringify(unfinished));
       } else {
         const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
@@ -895,7 +1034,7 @@ function NutBoltGame() {
     } catch (err) {
       console.warn("State save warning:", err);
     }
-  }, [bolts, history, moveCount, undoCount, level, isInitialLoadDone, completedLevels, soundEnabled]);
+  }, [bolts, history, moveCount, undoCount, resetsUsed, level, isInitialLoadDone, completedLevels, soundEnabled]);
   // ----------------------------------------------------------
   // END SUB-SECTION: EFFECT — SAVE IN-PROGRESS STATE / DETECT WIN
   // ----------------------------------------------------------
@@ -903,23 +1042,24 @@ function NutBoltGame() {
 
   // ----------------------------------------------------------
   // SUB-SECTION: LEVEL PAGE / UNLOCK HELPERS
-  // Utilities for the level browser pagination and page-lock system.
-  // A page unlocks when the previous page has >= 8 completions.
+  // Utilities for 10-level chunk unlocking and 30-level page pagination.
+  // Set 0 = levels 1-10, Set 1 = levels 11-20, etc.
+  // Set k unlocks when Set k-1 has >= 8 completed levels.
   // ----------------------------------------------------------
-  const getPageCompletionCount = (pageIndex) => {
-    const startLvl = pageIndex * 10 + 1;
-    const endLvl = (pageIndex + 1) * 10;
+  const getSetCompletionCount = (setIdx: number) => {
+    const startLvl = setIdx * 10 + 1;
+    const endLvl = (setIdx + 1) * 10;
     return completedLevels.filter(lvl => lvl >= startLvl && lvl <= endLvl).length;
   };
 
-  const isPageUnlocked = (pageIndex) => {
-    if (pageIndex === 0) return true;
-    return getPageCompletionCount(pageIndex - 1) >= 8;
+  const isSetUnlocked = (setIdx: number) => {
+    if (setIdx <= 0) return true;
+    return getSetCompletionCount(setIdx - 1) >= 8;
   };
 
-  const canAdvanceToLevel = (targetLvl) => {
-    const targetPage = Math.floor((targetLvl - 1) / 10);
-    return isPageUnlocked(targetPage);
+  const canAdvanceToLevel = (targetLvl: number) => {
+    const setIdx = Math.floor((targetLvl - 1) / 10);
+    return isSetUnlocked(setIdx);
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: LEVEL PAGE / UNLOCK HELPERS
@@ -928,11 +1068,11 @@ function NutBoltGame() {
 
   // ----------------------------------------------------------
   // SUB-SECTION: USERNAME SUBMIT HANDLER
-  // Validates and saves the 3-letter player tag on first launch.
+  // Validates and saves the 4-letter player tag on first launch.
   // ----------------------------------------------------------
   const handleUsernameSubmit = () => {
-    const clean = pendingUsername.trim().toUpperCase().slice(0, 3);
-    const finalName = clean.length > 0 ? clean : 'AAA';
+    const clean = pendingUsername.trim().toUpperCase().slice(0, 4);
+    const finalName = clean.length > 0 ? clean : 'AAAA';
     setUsername(finalName);
     safeStorage.setItem('nb_arcade_name_v7', finalName);
     setShowUsernamePrompt(false);
@@ -1144,37 +1284,22 @@ function NutBoltGame() {
   // Falls back to generating a solved board and applying
   // controlled reverse-shuffling steps.
   // ----------------------------------------------------------
-  const loadAndGenerateLevel = (forceNew = false) => {
+  const loadAndGenerateLevel = (forceNew = false, initialResets = 0) => {
     if (!forceNew) {
-      if (completedLevels.includes(level)) {
-        try {
-          const snapshots = JSON.parse(safeStorage.getItem('nb_level_snapshots_v8') || '{}');
-          if (snapshots[level]) {
-            setBolts(snapshots[level]);
-            setSelectedIdx(null);
-            setHistory([]);
-            setMoveCount(0);
-            setUndoCount(0);
-            return;
-          }
-        } catch {
-          /* ignore */
+      try {
+        const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
+        if (unfinished[`stage_${level}`]) {
+          const saved = unfinished[`stage_${level}`];
+          setBolts(saved.bolts);
+          setHistory(saved.history || []);
+          setMoveCount(saved.moveCount || 0);
+          setUndoCount(saved.undoCount || 0);
+          setResetsUsed(saved.resetsUsed || 0);
+          setSelectedIdx(null);
+          return;
         }
-      } else {
-        try {
-          const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
-          if (unfinished[`stage_${level}`]) {
-            const saved = unfinished[`stage_${level}`];
-            setBolts(saved.bolts);
-            setHistory(saved.history || []);
-            setMoveCount(saved.moveCount || 0);
-            setUndoCount(saved.undoCount || 0);
-            setSelectedIdx(null);
-            return;
-          }
-        } catch {
-          /* ignore */
-        }
+      } catch {
+        /* ignore */
       }
     }
 
@@ -1217,6 +1342,7 @@ function NutBoltGame() {
     setHistory([]);
     setMoveCount(0);
     setUndoCount(0);
+    setResetsUsed(forceNew ? initialResets : 0);
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: LOAD AND GENERATE LEVEL
@@ -1245,11 +1371,40 @@ function NutBoltGame() {
     }
     return count;
   };
+
+  const getValidTargetsForBolt = (fromIdx: number, currentBolts = bolts) => {
+    const sourcePeg = currentBolts[fromIdx];
+    if (!sourcePeg || sourcePeg.nuts.length === 0) return [];
+    if (checkBoltLock(sourcePeg.nuts)) return [];
+
+    const topNut = sourcePeg.nuts[sourcePeg.nuts.length - 1];
+    const capacity = currentConfig.capacity || 5;
+
+    const targets: number[] = [];
+    for (let i = 0; i < currentBolts.length; i++) {
+      if (i === fromIdx) continue;
+      const targetPeg = currentBolts[i];
+      if (!targetPeg) continue;
+      if (checkBoltLock(targetPeg.nuts)) continue;
+      if (targetPeg.nuts.length >= capacity) continue;
+
+      if (targetPeg.nuts.length > 0 && targetPeg.nuts[targetPeg.nuts.length - 1].id !== topNut.id) {
+        continue;
+      }
+
+      targets.push(i);
+    }
+    return targets;
+  };
   // ----------------------------------------------------------
   // END SUB-SECTION: BOLT / NUT LOGIC HELPERS
   // ----------------------------------------------------------
 
 
+  // ----------------------------------------------------------
+  // SUB-SECTION: DRAG & DROP TARGET FINDER (findTargetBoltForDrop)
+  // Calculates direct hit or proximity distance to valid target bolts.
+  // ----------------------------------------------------------
   const findTargetBoltForDrop = (clientX: number, clientY: number, sourceIdx: number): number | null => {
     if (sourceIdx < 0 || sourceIdx >= bolts.length) return null;
     const sourcePeg = bolts[sourceIdx];
@@ -1331,12 +1486,15 @@ function NutBoltGame() {
 
     return null;
   };
+  // ----------------------------------------------------------
+  // END SUB-SECTION: DRAG & DROP TARGET FINDER
+  // ----------------------------------------------------------
+
 
   // ----------------------------------------------------------
-  // SUB-SECTION: BOLT CLICK HANDLER (handleBoltClick)
-  // First tap selects a source bolt; second tap on a different bolt
-  // attempts to move the top matching run of nuts to the target.
-  // Reveals the next hidden nut on the source bolt after a move.
+  // SUB-SECTION: MOVE EXECUTION ENGINE (executeMove)
+  // Validates target capacity & top nut color, updates bolt state,
+  // reveals new top nuts, records move history, and plays sound/animations.
   // ----------------------------------------------------------
   const executeMove = (fromIdx: number, toIdx: number) => {
     if (fromIdx === toIdx) {
@@ -1408,7 +1566,12 @@ function NutBoltGame() {
     setBolts(updatedBolts);
     setSelectedIdx(null);
     setMoveCount(prev => prev + 1);
-    playPlace(soundEnabled);
+
+    const targetNutCountAfterMove = updatedBolts[toIdx].nuts.length;
+    const capacity = currentConfig.capacity || 5;
+    const newSlotIndex = Math.max(0, targetNutCountAfterMove - 1);
+    const stackRatio = capacity > 1 ? newSlotIndex / (capacity - 1) : 0;
+    playPlace(soundEnabled, stackRatio);
     setJustPlacedIdx(toIdx);
     setTimeout(() => setJustPlacedIdx(null), 300);
     
@@ -1421,14 +1584,54 @@ function NutBoltGame() {
       setTimeout(() => setJustLockedIdx(null), 800);
     }
   };
+  // ----------------------------------------------------------
+  // END SUB-SECTION: MOVE EXECUTION ENGINE
+  // ----------------------------------------------------------
 
+
+  // ----------------------------------------------------------
+  // SUB-SECTION: BOLT CLICK HANDLER (handleBoltClick)
+  // First tap selects a source bolt; second tap on a different bolt
+  // attempts to move the top matching run of nuts to the target.
+  // Performs single-target auto-moves without requiring a second tap.
+  // ----------------------------------------------------------
   const handleBoltClick = (idx: number) => {
-    // Pure drag and drop handling; ensure any lingering selection is cleared
+    if (Date.now() - lastTouchTimeRef.current < 400) {
+      return;
+    }
+
     if (selectedIdx !== null) {
       if (selectedIdx !== idx) {
         executeMove(selectedIdx, idx);
       } else {
         setSelectedIdx(null);
+      }
+      return;
+    }
+
+    // Nothing selected yet: determine valid targets for this bolt
+    const targets = getValidTargetsForBolt(idx);
+    const matchingTargets = targets.filter(tIdx => bolts[tIdx] && bolts[tIdx].nuts.length > 0);
+    const emptyTargets = targets.filter(tIdx => bolts[tIdx] && bolts[tIdx].nuts.length === 0);
+
+    if (matchingTargets.length === 1) {
+      // Single matching target stack exists: move directly to it
+      executeMove(idx, matchingTargets[0]);
+    } else if (matchingTargets.length > 1) {
+      // Multiple non-empty matching stacks exist: play error sound & trigger error shake animation
+      setErrorIdx(idx);
+      playError(soundEnabled);
+      setTimeout(() => setErrorIdx(null), 400);
+    } else if (emptyTargets.length > 0) {
+      // No matching stacks, but empty bolt(s) exist: auto-move to the first available empty bolt
+      executeMove(idx, emptyTargets[0]);
+    } else {
+      // 0 valid targets
+      const bolt = bolts[idx];
+      if (bolt && bolt.nuts.length > 0 && !checkBoltLock(bolt.nuts)) {
+        setErrorIdx(idx);
+        playError(soundEnabled);
+        setTimeout(() => setErrorIdx(null), 400);
       }
     }
   };
@@ -1440,12 +1643,14 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   // SUB-SECTION: UNDO HANDLER (handleUndo)
   // Pops the last bolt state from history and restores it.
+  // Counts undo as a move.
   // ----------------------------------------------------------
   const handleUndo = () => {
     if (history.length === 0) return;
     setBolts(JSON.parse(history[history.length - 1]));
     setHistory(history.slice(0, -1));
     setUndoCount(prev => prev + 1);
+    setMoveCount(prev => prev + 1);
     setSelectedIdx(null);
   };
   // ----------------------------------------------------------
@@ -1455,10 +1660,11 @@ function NutBoltGame() {
 
   // ----------------------------------------------------------
   // SUB-SECTION: RESET HANDLER (handleReset)
-  // Clears unfinished progress for the current level and
-  // regenerates a fresh puzzle from scratch.
+  // Clears unfinished progress for the current level, increments
+  // resetsUsed counter, and regenerates a fresh puzzle.
   // ----------------------------------------------------------
   const handleReset = () => {
+    const nextResets = resetsUsed + 1;
     try {
       const unfinished = JSON.parse(safeStorage.getItem('nb_unfinished_snapshots_v8') || '{}');
       if (unfinished[`stage_${level}`]) {
@@ -1468,7 +1674,7 @@ function NutBoltGame() {
     } catch {
       /* ignore */
     }
-    loadAndGenerateLevel(true);
+    loadAndGenerateLevel(true, nextResets);
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: RESET HANDLER
@@ -1484,8 +1690,10 @@ function NutBoltGame() {
     safeStorage.clear();
     setLevel(1);
     setCompletedLevels([]);
+    setLevelRecords({});
+    setUserLevelScores({});
     setPlayerScores({});
-    setUsername('AAA');
+    setUsername('AAAA');
     setShowSettings(false);
     setConfirmWipe(false);
     setShowUsernamePrompt(true);
@@ -1497,13 +1705,23 @@ function NutBoltGame() {
 
   // ----------------------------------------------------------
   // SUB-SECTION: SCORE CALCULATOR (calculateLevelScore)
-  // Derives a score for the completed level based on bolt count,
-  // reveal bonus, move count, and undo penalties.
+  // Derives an efficiency score based on moves used vs target,
+  // with bonuses for no resets used (+350) and 10/10 set completion (+500).
   // ----------------------------------------------------------
   const calculateLevelScore = () => {
-    const baseVal = 1500 + ((currentConfig.activeBolts - currentConfig.colors) * 250) + (currentConfig.isRevealLevel ? 500 : 0);
-    const efficiencyFactor = Math.max(50, 400 - (moveCount * 2) - (undoCount * 4));
-    return baseVal + efficiencyFactor;
+    const par = getLevelPar(currentConfig);
+    const moveRatio = par / Math.max(1, moveCount || par);
+    const efficiencyBase = Math.round(1000 * Math.min(2.0, Math.max(0.2, moveRatio)));
+
+    const noResetBonus = (resetsUsed === 0) ? Math.round(efficiencyBase * 0.10) : 0;
+
+    const setIdx = Math.floor((level - 1) / 10);
+    const startLvl = setIdx * 10 + 1;
+    const setCompletedCount = Array.from({ length: 10 }, (_, i) => startLvl + i)
+      .filter(lvl => lvl === level || completedLevels.includes(lvl)).length;
+    const setBonus = (setCompletedCount === 10) ? 500 : 0;
+
+    return efficiencyBase + noResetBonus + setBonus;
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: SCORE CALCULATOR
@@ -1513,8 +1731,8 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   // SUB-SECTION: NEXT LEVEL PROGRESSION (handleNextLevelProgress)
   // Called when the player taps "PROCEED NEXT" on the stage-clear
-  // screen. Awards score (first clear only), marks level complete,
-  // and either advances or shows the intro-complete popup for level 5.
+  // screen. Awards score (first clear only), updates level record,
+  // marks level complete, and either advances or shows intro popup.
   // ----------------------------------------------------------
   const handleNextLevelProgress = () => {
     const scoreGenerated = calculateLevelScore();
@@ -1523,18 +1741,62 @@ function NutBoltGame() {
     
     const wasIntroLvl = level === 5;
 
-    if (!completedLevels.includes(level)) {
+    // Record best move count for this level (locally & globally on Supabase)
+    const currentRecord = levelRecords[level];
+    if (moveCount > 0 && (currentRecord === undefined || currentRecord <= 0 || moveCount < currentRecord)) {
+      const updatedRecords = { ...levelRecords, [level]: moveCount };
+      setLevelRecords(updatedRecords);
+      safeStorage.setItem('nb_level_records_v1', JSON.stringify(updatedRecords));
+
+      if (isGlobalLeaderboardEnabled && supabase) {
+        supabase.from('level_records').upsert({
+          level,
+          record_moves: moveCount,
+          holder_username: username,
+          updated_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) console.warn('Global level record sync failed:', error);
+        });
+      }
+    }
+
+    const isFirstClear = !completedLevels.includes(level);
+    const previousLevelScore = userLevelScores[level] || 0;
+
+    if (isFirstClear) {
+      const newUserScores = { ...userLevelScores, [level]: scoreGenerated };
+      setUserLevelScores(newUserScores);
+      safeStorage.setItem('nb_user_level_scores_v1', JSON.stringify(newUserScores));
+
       updated[username].totalScore += scoreGenerated;
       updated[username].levelsPlayed += 1;
       setPlayerScores(updated);
       safeStorage.setItem('nb_global_leaderboard_v7', JSON.stringify(updated));
-      const nextCompleted = [...completedLevels, level];
+      const nextCompleted = Array.from(new Set([...completedLevels, level]));
       setCompletedLevels(nextCompleted);
       safeStorage.setItem('nb_completed_levels_v8', JSON.stringify(nextCompleted));
 
-      // Local cache above always succeeds and is what keeps this
-      // browser working offline; this is the "make it actually global"
-      // half — best-effort, never blocks or breaks play if it fails.
+      if (isGlobalLeaderboardEnabled && supabase) {
+        supabase.from('leaderboard').upsert({
+          username,
+          total_score: updated[username].totalScore,
+          levels_played: updated[username].levelsPlayed,
+          updated_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) console.warn('Global leaderboard sync failed:', error);
+        });
+      }
+    } else if (scoreGenerated > previousLevelScore) {
+      // Replay: replace old score with the new higher score
+      const diff = scoreGenerated - previousLevelScore;
+      const newUserScores = { ...userLevelScores, [level]: scoreGenerated };
+      setUserLevelScores(newUserScores);
+      safeStorage.setItem('nb_user_level_scores_v1', JSON.stringify(newUserScores));
+
+      updated[username].totalScore += diff;
+      setPlayerScores(updated);
+      safeStorage.setItem('nb_global_leaderboard_v7', JSON.stringify(updated));
+
       if (isGlobalLeaderboardEnabled && supabase) {
         supabase.from('leaderboard').upsert({
           username,
@@ -1556,17 +1818,21 @@ function NutBoltGame() {
 
   const advanceStage = () => {
     const nextLvl = level + 1;
-    if (canAdvanceToLevel(nextLvl)) {
-      setLevel(nextLvl);
-    } else {
+    const isTenthLevel = level % 10 === 0;
+    const isNextCompleted = completedLevels.includes(nextLvl);
+    const isNextLocked = !canAdvanceToLevel(nextLvl);
+
+    if ((isTenthLevel && (isNextCompleted || isNextLocked)) || isNextLocked) {
       setShowLevelBrowser(true);
-      setBrowserPage(Math.floor((level - 1) / 10));
+      setBrowserPage(Math.floor((level - 1) / 30));
+    } else {
+      setLevel(nextLvl);
     }
   };
 
   const openLevelBrowser = () => {
     setShowLevelBrowser(true);
-    setBrowserPage(Math.floor((level - 1) / 10));
+    setBrowserPage(Math.floor((level - 1) / 30));
   };
   // ----------------------------------------------------------
   // END SUB-SECTION: NEXT LEVEL PROGRESSION
@@ -1578,7 +1844,7 @@ function NutBoltGame() {
   // isLevelClear — true when all bolts are empty or locked.
   // sortedLeaderboard — player entries sorted by average score desc.
   // ----------------------------------------------------------
-  const isLevelClear = bolts.length > 0 && bolts.every(b => b.nuts.length === 0 || checkBoltLock(b.nuts));
+  const isLevelClear = bolts.length > 0 && moveCount > 0 && bolts.every(b => b.nuts.length === 0 || checkBoltLock(b.nuts));
   
   const sortedLeaderboard = Object.entries(playerScores)
     .map(([name, data]) => ({
@@ -1745,13 +2011,41 @@ function NutBoltGame() {
         </button>
 
         <div className="flex items-center gap-2">
-          <button type="button" disabled={level <= 1} onClick={() => level > 1 && setLevel(p => p - 1)} className="w-10 h-10 bg-white/15 border border-white/30 rounded-xl flex items-center justify-center text-slate-900 dark:text-white active:bg-white/25 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md">
+          <button 
+            type="button" 
+            disabled={level <= 1} 
+            onClick={() => {
+              if (level > 1) {
+                const targetLvl = level - 1;
+                if (completedLevels.includes(targetLvl)) {
+                  setCompletedLevelNotice(targetLvl);
+                } else {
+                  setLevel(targetLvl);
+                }
+              }
+            }} 
+            className="w-10 h-10 bg-white/15 border border-white/30 rounded-xl flex items-center justify-center text-slate-900 dark:text-white active:bg-white/25 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md"
+          >
             <ChevronLeft size={20} strokeWidth={3} />
           </button>
           <button type="button" onClick={openLevelBrowser} className="px-6 h-10 bg-white/25 border border-white/40 rounded-xl flex items-center justify-center font-black text-lg tracking-tight text-slate-900 dark:text-white hover:bg-white/35 transition-all shadow-sm backdrop-blur-md">
             LVL {level}
           </button>
-          <button type="button" disabled={!canAdvanceToLevel(level + 1)} onClick={() => setLevel(p => p + 1)} className="w-10 h-10 bg-white/15 border border-white/30 rounded-xl flex items-center justify-center text-slate-900 dark:text-white active:bg-white/25 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md">
+          <button 
+            type="button" 
+            disabled={!canAdvanceToLevel(level + 1)} 
+            onClick={() => {
+              const targetLvl = level + 1;
+              if (canAdvanceToLevel(targetLvl)) {
+                if (completedLevels.includes(targetLvl)) {
+                  setCompletedLevelNotice(targetLvl);
+                } else {
+                  setLevel(targetLvl);
+                }
+              }
+            }} 
+            className="w-10 h-10 bg-white/15 border border-white/30 rounded-xl flex items-center justify-center text-slate-900 dark:text-white active:bg-white/25 hover:bg-white/25 disabled:opacity-35 transition-all shadow-sm backdrop-blur-md"
+          >
             <ChevronRight size={20} strokeWidth={3} />
           </button>
         </div>
@@ -1845,12 +2139,10 @@ function NutBoltGame() {
                     if (bolt.nuts.length === 0 || isLocked) return;
                     const touch = e.touches[0];
                     if (!touch) return;
-                    if (selectedIdx !== globalIdx) {
-                      setSelectedIdx(globalIdx);
-                      playPickup(soundEnabled);
-                    }
                     setTouchDrag({
                       sourceIdx: globalIdx,
+                      startX: touch.clientX,
+                      startY: touch.clientY,
                       x: touch.clientX,
                       y: touch.clientY,
                       movingNuts,
@@ -1866,14 +2158,19 @@ function NutBoltGame() {
                   onTouchEnd={(e) => {
                     if (!touchDrag) return;
                     const touch = e.changedTouches[0];
+                    lastTouchTimeRef.current = Date.now();
                     if (touch) {
+                      const startX = touchDrag.startX ?? touchDrag.x;
+                      const startY = touchDrag.startY ?? touchDrag.y;
+                      const dist = Math.hypot(touch.clientX - startX, touch.clientY - startY);
                       const targetIdx = findTargetBoltForDrop(touch.clientX, touch.clientY, touchDrag.sourceIdx);
-                      if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx) {
+                      if (targetIdx !== null && targetIdx !== touchDrag.sourceIdx && dist > 18) {
                         executeMove(touchDrag.sourceIdx, targetIdx);
+                      } else {
+                        handleBoltClick(touchDrag.sourceIdx);
                       }
                     }
                     setTouchDrag(null);
-                    setSelectedIdx(null);
                   }}
                   className={`relative flex flex-col items-center cursor-pointer group select-none transition-transform transition-opacity duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isLocked ? 'opacity-60' : ''} ${errorIdx === globalIdx ? 'animate-error-shake' : ''} ${justLockedIdx === globalIdx ? 'animate-lock-burst' : ''}`}
                   style={{ height: `${pegHeight}px`, width: `${boltColWidth}px` }}
@@ -2012,8 +2309,10 @@ function NutBoltGame() {
           </div>
           <div className="w-[1px] h-6 bg-white/30" />
           <div className="flex flex-col items-center min-w-[36px]">
-            <span className="text-[9px] text-slate-700 dark:text-slate-200 uppercase font-bold tracking-wider">Height</span>
-            <span className="text-sm font-black text-sky-500 dark:text-sky-300">{currentConfig.capacity}</span>
+            <span className="text-[9px] text-slate-700 dark:text-slate-200 uppercase font-bold tracking-wider">Record</span>
+            <span className="text-sm font-black text-emerald-400 dark:text-emerald-300">
+              {levelRecords[level] !== undefined ? levelRecords[level] : '-'}
+            </span>
           </div>
         </div>
       </footer>
@@ -2023,28 +2322,63 @@ function NutBoltGame() {
       {/* ======================================================
           MODAL: STAGE CLEAR INTERSTITIAL
           Shown when isLevelClear is true (and not the intro clear pop).
-          Displays score and a "PROCEED NEXT" button.
+          Displays score, efficiency %, moves vs par, and a "PROCEED NEXT" button.
           ====================================================== */}
-      {isLevelClear && !showIntroClearPop && (
-        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-40">
-          <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-[28px] p-6 text-center space-y-5 shadow-2xl">
-            <div className="w-16 h-16 bg-amber-500/10 border-2 border-amber-500/30 rounded-full flex items-center justify-center mx-auto text-amber-400">
-              <Trophy size={32} />
+      {isLevelClear && !showIntroClearPop && (() => {
+        const currentPar = getLevelPar(currentConfig);
+        const efficiencyPct = Math.round((currentPar / Math.max(1, moveCount)) * 100);
+        const effBase = Math.round(1000 * Math.min(2.0, Math.max(0.2, currentPar / Math.max(1, moveCount))));
+        const noResetAmt = Math.round(effBase * 0.10);
+
+        return (
+          <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-40 animate-in fade-in duration-150">
+            <div className="w-full max-w-xs bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 text-center space-y-3.5 shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white">
+              <div className="w-14 h-14 bg-amber-400/20 border-2 border-amber-300/40 rounded-full flex items-center justify-center mx-auto text-amber-300 backdrop-blur-md shadow-sm">
+                <Trophy size={28} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tight drop-shadow-sm">STAGE CLEAR!</h2>
+                
+                <div className="bg-white/10 rounded-2xl p-2.5 border border-white/20 text-xs space-y-1 mt-2">
+                  <div className="flex justify-between font-bold text-slate-200">
+                    <span>Moves: <strong className="text-white">{moveCount}</strong></span>
+                    <span>Par: <strong className="text-sky-300">{currentPar}</strong></span>
+                  </div>
+                  <div className="flex justify-between font-black text-xs">
+                    <span className="text-slate-200">Efficiency:</span>
+                    <span className="text-amber-300">{efficiencyPct}%</span>
+                  </div>
+                  <div className="flex justify-between font-black text-xs border-t border-white/10 pt-1">
+                    <span className="text-slate-200">Score Earned:</span>
+                    <span className="text-emerald-300">+{calculateLevelScore()} pts</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap justify-center gap-1.5 mt-2">
+                  {resetsUsed === 0 && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 backdrop-blur-md shadow-sm">
+                      ⚡ No Reset Bonus (+{noResetAmt})
+                    </span>
+                  )}
+                  {Array.from({ length: 10 }, (_, i) => Math.floor((level - 1) / 10) * 10 + 1 + i)
+                    .filter(l => l === level || completedLevels.includes(l)).length === 10 && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-500/30 text-amber-200 border border-amber-400/40 backdrop-blur-md shadow-sm">
+                      🏆 10/10 Set Mastery (+500)
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleNextLevelProgress}
+                className="w-full py-3.5 bg-blue-600/90 hover:bg-blue-500 font-black text-sm rounded-2xl uppercase tracking-wider shadow-lg active:scale-98 transition-all border border-blue-400/40 backdrop-blur-md"
+              >
+                PROCEED NEXT
+              </button>
             </div>
-            <div>
-              <h2 className="text-2xl font-black uppercase tracking-tight">STAGE CLEAR!</h2>
-              <p className="text-xs text-slate-400 mt-1">Score Calculated: +{calculateLevelScore()}</p>
-            </div>
-            <button
-              type="button"
-              onClick={handleNextLevelProgress}
-              className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 font-black text-sm rounded-xl uppercase tracking-wider shadow-lg active:brightness-90 transition-all"
-            >
-              PROCEED NEXT
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* END MODAL: STAGE CLEAR INTERSTITIAL */}
 
 
@@ -2054,22 +2388,22 @@ function NutBoltGame() {
           Congratulates the player and gates entry to the full game.
           ====================================================== */}
       {showIntroClearPop && (
-        <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-xs bg-slate-900 border-2 border-amber-500/40 rounded-[28px] p-6 text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="w-14 h-14 bg-gradient-to-tr from-amber-500 to-orange-500 rounded-2xl flex items-center justify-center mx-auto text-slate-950 font-black text-xl rotate-12 shadow-lg">
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="w-full max-w-xs bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 text-center space-y-4 shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 bg-amber-400/25 border border-amber-300/50 rounded-2xl flex items-center justify-center mx-auto text-amber-200 font-black text-xl rotate-12 shadow-lg backdrop-blur-md">
               🚀
             </div>
             <div>
-              <h2 className="text-xl font-black text-amber-400 uppercase tracking-tight">Training Complete!</h2>
+              <h2 className="text-xl font-black text-amber-300 uppercase tracking-tight drop-shadow-sm">Training Complete!</h2>
               <p className="text-sm text-white font-bold mt-2">The game begins now!</p>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              <p className="text-xs text-slate-100 font-medium mt-1 leading-relaxed">
                 Introductory levels are behind you. Prepare for full grid variants and hidden layers. Good luck!
               </p>
             </div>
             <button 
               type="button" 
               onClick={() => { setShowIntroClearPop(false); advanceStage(); }} 
-              className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl uppercase tracking-widest shadow-lg active:scale-98 transition-transform"
+              className="w-full py-3 bg-amber-500/90 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-2xl uppercase tracking-widest shadow-lg active:scale-98 transition-transform border border-amber-300/50 backdrop-blur-md"
             >
               UNLEASH THE GRID
             </button>
@@ -2082,27 +2416,27 @@ function NutBoltGame() {
       {/* ======================================================
           MODAL: USERNAME PROMPT (INITIAL LOAD)
           Shown on first launch when no saved name exists.
-          Collects a 3-letter player tag for the leaderboard.
+          Collects a 4-letter player tag for the leaderboard.
           ====================================================== */}
       {showUsernamePrompt && (
-        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-[60]">
-          <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-[28px] p-6 text-center space-y-4 shadow-2xl">
-            <h2 className="text-xl font-black uppercase tracking-tight">Welcome, Pilot!</h2>
-            <p className="text-xs text-slate-400">Provide a 3-letter signature badge prefix for global leaderboards</p>
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-[60] animate-in fade-in duration-150">
+          <div className="w-full max-w-xs bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 text-center space-y-4 shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white">
+            <h2 className="text-xl font-black uppercase tracking-tight drop-shadow-sm">Welcome, Pilot!</h2>
+            <p className="text-xs text-slate-100 font-medium">Provide a 4-letter signature badge prefix for global leaderboards</p>
             <input
               type="text"
               autoFocus
-              maxLength={3}
+              maxLength={4}
               value={pendingUsername}
               onChange={(e) => setPendingUsername(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && handleUsernameSubmit()}
-              placeholder="AAA"
-              className="w-full p-3 bg-slate-950 text-amber-400 text-center font-black text-xl tracking-widest border border-slate-800 rounded-xl focus:outline-none focus:border-amber-500"
+              placeholder="AAAA"
+              className="w-full p-3 bg-black/30 text-amber-300 text-center font-black text-xl tracking-widest border border-white/30 rounded-2xl focus:outline-none focus:border-amber-400 placeholder-slate-400/60 backdrop-blur-md"
             />
             <button
               type="button"
               onClick={handleUsernameSubmit}
-              className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 font-black text-sm rounded-xl uppercase tracking-wider"
+              className="w-full py-3 bg-blue-600/90 hover:bg-blue-500 font-black text-sm rounded-2xl uppercase tracking-wider border border-blue-400/30 backdrop-blur-md shadow-md"
             >
               Start Sorting
             </button>
@@ -2118,48 +2452,48 @@ function NutBoltGame() {
           Top 3 get gold/silver/bronze badge styling.
           ====================================================== */}
       {showLeaderboard && (
-        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-[28px] p-5 space-y-4 max-h-[80%] flex flex-col shadow-2xl">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-amber-400">
-                <Crown size={16} />
-                <h3 className="text-sm font-black uppercase tracking-wider">GLOBAL LEADERBOARD</h3>
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 space-y-4 max-h-[85vh] flex flex-col shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white">
+            <div className="flex justify-between items-center pb-3 border-b border-white/20">
+              <div className="flex items-center gap-2 text-amber-300">
+                <Crown size={20} />
+                <h3 className="text-base font-black uppercase tracking-wider drop-shadow-sm">GLOBAL LEADERBOARD</h3>
               </div>
-              <button type="button" className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer" onClick={() => setShowLeaderboard(false)}>
-                <X size={16} strokeWidth={2.5} />
+              <button type="button" className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/20 backdrop-blur-md" onClick={() => setShowLeaderboard(false)}>
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto overscroll-contain space-y-2 pr-1">
+            <div className="flex-1 overflow-y-auto overscroll-contain space-y-2.5 pr-1">
               {sortedLeaderboard.length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-300 font-medium">No recorded highscores found yet.</div>
+                <div className="text-center py-8 text-xs text-slate-200 font-medium">No recorded highscores found yet.</div>
               ) : (
                 sortedLeaderboard.map((player, rank) => {
-                  let rankStyle = "border-slate-800 bg-slate-950/40 text-slate-300";
-                  let badge = <span className="text-slate-300 font-bold w-5 text-center">{rank + 1}</span>;
+                  let rankStyle = "border-white/20 bg-white/10 text-slate-100 backdrop-blur-md";
+                  let badge = <span className="text-slate-200 font-bold w-5 text-center">{rank + 1}</span>;
                   
                   if (rank === 0) {
-                    rankStyle = "border-amber-500/30 bg-amber-500/5 text-amber-400 font-bold";
-                    badge = <Crown size={12} className="text-amber-400 w-5" />;
+                    rankStyle = "border-amber-400/50 bg-amber-400/20 text-amber-200 font-bold backdrop-blur-md shadow-sm";
+                    badge = <Crown size={16} className="text-amber-300 w-5" />;
                   } else if (rank === 1) {
-                    rankStyle = "border-slate-400/30 bg-slate-400/5 text-slate-200 font-semibold";
-                    badge = <span className="text-slate-400 font-black w-5 text-center">2</span>;
+                    rankStyle = "border-slate-300/50 bg-white/20 text-white font-semibold backdrop-blur-md";
+                    badge = <span className="text-slate-200 font-black w-5 text-center">2</span>;
                   } else if (rank === 2) {
-                    rankStyle = "border-orange-700/30 bg-orange-700/5 text-orange-400 font-semibold";
-                    badge = <span className="text-orange-500 font-black w-5 text-center">3</span>;
+                    rankStyle = "border-amber-600/50 bg-amber-600/20 text-amber-200 font-semibold backdrop-blur-md";
+                    badge = <span className="text-amber-300 font-black w-5 text-center">3</span>;
                   }
 
                   return (
-                    <div key={player.name} className={`flex justify-between items-center px-3 py-2.5 rounded-xl border font-medium text-xs ${rankStyle}`}>
-                      <div className="flex items-center gap-2">
+                    <div key={player.name} className={`flex justify-between items-center px-4 py-3 rounded-2xl border font-medium text-xs ${rankStyle}`}>
+                      <div className="flex items-center gap-2.5">
                         {badge}
-                        <span className="uppercase tracking-wider">{player.name}</span>
+                        <span className="uppercase tracking-wider font-extrabold">{player.name}</span>
                       </div>
                       <div className="text-right">
-                        <div className="text-white font-extrabold">
-                          {player.avgScore} <span className="text-[9px] font-normal text-slate-400">avg</span>
+                        <div className="text-white font-black text-sm">
+                          {player.avgScore} <span className="text-[10px] font-normal text-slate-200">avg</span>
                         </div>
-                        <div className="text-[9px] text-slate-300">{player.levelsPlayed} clear(s)</div>
+                        <div className="text-[10px] text-slate-200">{player.levelsPlayed} clear(s)</div>
                       </div>
                     </div>
                   );
@@ -2178,38 +2512,39 @@ function NutBoltGame() {
           confirmWipe toggles the two-step confirm flow.
           ====================================================== */}
       {showSettings && (
-        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-[28px] p-5 space-y-4 shadow-2xl">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-              <h3 className="text-sm font-black uppercase tracking-wider">PLAYER PROFILE</h3>
-              <button type="button" className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer" onClick={() => { setShowSettings(false); setConfirmWipe(false); }}>
-                <X size={16} strokeWidth={2.5} />
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 space-y-4 shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white">
+            <div className="flex justify-between items-center pb-3 border-b border-white/20">
+              <h3 className="text-base font-black uppercase tracking-wider text-white drop-shadow-sm">PLAYER PROFILE</h3>
+              <button type="button" className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/20 backdrop-blur-md" onClick={() => { setShowSettings(false); setConfirmWipe(false); }}>
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
 
             {!confirmWipe ? (
               // -- Settings default view --
-              <div className="space-y-4">
+              <div className="space-y-4 pt-1">
                 <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-200 uppercase tracking-wide">Player Badge</label>
                   <input 
                     type="text" 
-                    maxLength={3} 
+                    maxLength={4} 
                     value={username} 
                     onChange={(e) => setUsername(e.target.value.toUpperCase())} 
-                    className="w-full p-2 bg-slate-950 text-amber-400 text-center font-black tracking-widest border border-slate-800 rounded-xl focus:outline-none focus:border-slate-600"
+                    className="w-full p-2.5 bg-black/30 text-amber-300 text-center font-black text-lg tracking-widest border border-white/25 rounded-2xl focus:outline-none focus:border-amber-400 placeholder-slate-400/60 backdrop-blur-md"
                   />
                 </div>
                 
                 <button 
                   type="button" 
                   onClick={() => { safeStorage.setItem('nb_arcade_name_v7', username); setShowSettings(false); }} 
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-xs font-black rounded-xl text-white uppercase tracking-wider transition-colors"
+                  className="w-full py-2.5 bg-blue-600/90 hover:bg-blue-500 text-xs font-black rounded-2xl text-white uppercase tracking-wider transition-colors shadow-md border border-blue-400/30 backdrop-blur-md"
                 >
                   SAVE NAME
                 </button>
 
                 <div className="flex items-center justify-between pt-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sound Effects</label>
+                  <label className="text-xs font-bold text-slate-200 uppercase tracking-wide">Sound Effects</label>
                   <button
                     type="button"
                     onClick={() => {
@@ -2217,14 +2552,14 @@ function NutBoltGame() {
                       setSoundEnabled(next);
                       safeStorage.setItem('nb_sound_enabled_v1', String(next));
                     }}
-                    className={`w-12 h-6 rounded-full relative transition-colors ${soundEnabled ? 'bg-blue-600' : 'bg-slate-700'}`}
+                    className={`w-12 h-7 rounded-full transition-colors relative p-1 border border-white/20 backdrop-blur-md ${soundEnabled ? 'bg-blue-600/80' : 'bg-white/15'}`}
                   >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${soundEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                    <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${soundEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </div>
 
                 <div className="flex items-center justify-between pt-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Background Color</label>
+                  <label className="text-xs font-bold text-slate-200 uppercase tracking-wide">Background Color</label>
                   <ColorPadPicker
                     color={bgColor}
                     onChange={(newColor) => {
@@ -2234,18 +2569,18 @@ function NutBoltGame() {
                   />
                 </div>
                 
-                <div className="pt-4 border-t border-slate-800/60 mt-4 space-y-2">
+                <div className="pt-4 border-t border-white/20 mt-4 space-y-2">
                   <button 
                     type="button" 
                     onClick={() => window.location.reload()} 
-                    className="w-full py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-bold rounded-xl uppercase transition-colors"
+                    className="w-full py-2.5 bg-white/15 hover:bg-white/25 text-slate-100 text-xs font-bold rounded-2xl uppercase transition-colors border border-white/20 backdrop-blur-md"
                   >
                     Refresh App
                   </button>
                   <button 
                     type="button" 
                     onClick={() => setConfirmWipe(true)} 
-                    className="w-full py-2 bg-red-950/40 border border-red-900/40 text-red-400 hover:bg-red-900/20 text-xs font-bold rounded-xl uppercase transition-colors"
+                    className="w-full py-2.5 bg-rose-500/20 border border-rose-400/30 text-rose-200 hover:bg-rose-500/30 text-xs font-bold rounded-2xl uppercase transition-colors backdrop-blur-md"
                   >
                     Wipe & Reset Data
                   </button>
@@ -2253,22 +2588,22 @@ function NutBoltGame() {
               </div>
             ) : (
               // -- Wipe confirmation view --
-              <div className="text-center p-1 space-y-4">
-                <p className="text-xs text-red-400 font-semibold leading-relaxed">
-                  Are you absolutely sure? This action clears all completed stages, high scores, and locally tracked profile history permanently.
+              <div className="space-y-3 text-center py-2">
+                <p className="text-xs text-rose-200 font-bold leading-relaxed">
+                  Are you sure? This will delete your leaderboard stats and clear all completed stage progress permanently.
                 </p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 pt-2">
                   <button 
                     type="button" 
                     onClick={() => setConfirmWipe(false)} 
-                    className="py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl text-slate-300 uppercase"
+                    className="py-2.5 bg-white/15 hover:bg-white/25 text-xs font-bold rounded-2xl text-slate-200 uppercase border border-white/20 backdrop-blur-md"
                   >
                     Cancel
                   </button>
                   <button 
                     type="button" 
                     onClick={handleWipeData} 
-                    className="py-2 bg-red-600 hover:bg-red-700 text-xs font-black rounded-xl text-white uppercase tracking-wider shadow-md"
+                    className="py-2.5 bg-rose-600 hover:bg-rose-500 text-xs font-black rounded-2xl text-white uppercase tracking-wider shadow-md border border-rose-400/40 backdrop-blur-md"
                   >
                     Confirm Wipe
                   </button>
@@ -2283,58 +2618,59 @@ function NutBoltGame() {
 
       {/* ======================================================
           MODAL: LEVEL SELECTOR / BROWSER
-          Paginated 10-level grid. Pages lock until the previous
-          page has >= 8 completions. Current and cleared levels
-          get distinct visual treatment.
+          Paginated 30-level grid (5 columns × 6 rows).
+          Levels unlock in 10-level sets when previous set has >= 8 clears.
           ====================================================== */}
       {showLevelBrowser && (
-        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-[28px] p-5 max-h-[85%] flex flex-col shadow-2xl">
-            <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
-              <h3 className="text-sm font-black uppercase tracking-wider">LEVEL SELECTOR</h3>
-              <button type="button" className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer" onClick={() => setShowLevelBrowser(false)}>
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 z-50 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm sm:max-w-md bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[28px] sm:rounded-[32px] p-3.5 sm:p-5 flex flex-col shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white space-y-2.5 sm:space-y-3">
+            <div className="flex justify-between items-center pb-2 border-b border-white/20">
+              <h3 className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow-sm">LEVEL SELECTOR</h3>
+              <button type="button" className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/15 hover:bg-white/25 text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/20 backdrop-blur-md" onClick={() => setShowLevelBrowser(false)}>
                 <X size={16} strokeWidth={2.5} />
               </button>
             </div>
 
             {/* Page navigation row */}
-            <div className="flex justify-between items-center bg-slate-950/80 rounded-xl p-2 mb-3 border border-slate-800 text-xs">
+            <div className="flex justify-between items-center bg-white/10 backdrop-blur-md rounded-xl sm:rounded-2xl p-2 sm:p-2.5 border border-white/20 text-xs sm:text-sm">
               <button 
                 type="button"
                 disabled={browserPage === 0}
-                onClick={() => setBrowserPage(p => p - 1)}
-                className="px-2 py-1 bg-slate-800 rounded-lg text-slate-300 disabled:opacity-20 flex items-center gap-0.5 font-bold transition-all"
+                onClick={() => setBrowserPage(p => Math.max(0, p - 1))}
+                className="px-2.5 py-1 bg-white/15 hover:bg-white/25 border border-white/20 rounded-lg sm:rounded-xl text-white disabled:opacity-20 flex items-center gap-1 font-bold transition-all shadow-sm"
               >
-                <ChevronLeft size={12} strokeWidth={2.5} /> Prev
+                <ChevronLeft size={14} strokeWidth={2.5} /> Prev
               </button>
               
-              <span className="font-bold text-slate-400">
-                Levels {browserPage * 10 + 1} - {(browserPage + 1) * 10}
+              <span className="font-extrabold text-white text-xs sm:text-sm tracking-wide">
+                Levels {browserPage * 30 + 1} – {(browserPage + 1) * 30}
               </span>
 
               <button 
                 type="button"
-                disabled={!isPageUnlocked(browserPage + 1)}
+                disabled={!isSetUnlocked((browserPage + 1) * 3)}
                 onClick={() => setBrowserPage(p => p + 1)}
-                className="px-2 py-1 bg-slate-800 rounded-lg text-slate-300 disabled:opacity-40 flex items-center gap-0.5 font-bold transition-all disabled:bg-slate-900/50"
+                className="px-2.5 py-1 bg-white/15 hover:bg-white/25 border border-white/20 rounded-lg sm:rounded-xl text-white disabled:opacity-30 flex items-center gap-1 font-bold transition-all shadow-sm disabled:bg-white/5"
               >
-                {!isPageUnlocked(browserPage + 1) ? (
-                  <span className="flex items-center gap-1 text-slate-600"><Lock size={10}/> Locked</span>
+                {!isSetUnlocked((browserPage + 1) * 3) ? (
+                  <span className="flex items-center gap-1 text-slate-200/60"><Lock size={12}/> Locked</span>
                 ) : (
-                  <>Next <ChevronRight size={12} strokeWidth={2.5} /></>
+                  <>Next <ChevronRight size={14} strokeWidth={2.5} /></>
                 )}
               </button>
             </div>
             
             {/* Unlock progress hint */}
-            <div className="text-[10px] text-slate-300 font-medium pb-2 text-center">
-              Requires 8 completions on current page to unlock next set ({getPageCompletionCount(browserPage)}/10 clear)
+            <div className="text-[11px] sm:text-xs text-slate-100 font-medium text-center tracking-wide">
+              Complete 8/10 levels in a set to unlock the next 10 levels
             </div>
 
-            {/* Level grid (5 columns × 2 rows = 10 levels per page) */}
-            <div className="flex-1 overflow-y-auto overscroll-contain grid grid-cols-5 gap-2 pt-1 pr-0.5">
-              {Array.from({ length: 10 }).map((_, i) => {
-                const targetLvl = browserPage * 10 + (i + 1);
+            {/* Level grid (5 columns strictly × 6 rows = 30 levels per page) */}
+            <div className="grid grid-cols-5 gap-1.5 sm:gap-2 pt-0.5">
+              {Array.from({ length: 30 }).map((_, i) => {
+                const targetLvl = browserPage * 30 + (i + 1);
+                const setIdx = Math.floor((targetLvl - 1) / 10);
+                const isUnlocked = isSetUnlocked(setIdx);
                 const isCurrent = targetLvl === level;
                 const isDone = completedLevels.includes(targetLvl);
 
@@ -2342,17 +2678,31 @@ function NutBoltGame() {
                   <button 
                     key={targetLvl} 
                     type="button" 
-                    onClick={() => { setLevel(targetLvl); setShowLevelBrowser(false); }} 
-                    className={`h-10 rounded-xl flex flex-col items-center justify-center border transition-all text-xs font-bold relative ${
+                    disabled={!isUnlocked}
+                    onClick={() => { 
+                      if (isDone) {
+                        setCompletedLevelNotice(targetLvl);
+                        setShowLevelBrowser(false);
+                      } else {
+                        setLevel(targetLvl); 
+                        setShowLevelBrowser(false); 
+                      }
+                    }} 
+                    className={`h-8 sm:h-10 rounded-xl sm:rounded-2xl flex items-center justify-center border transition-all text-xs sm:text-sm font-black relative shadow-sm backdrop-blur-md ${
                       isCurrent 
-                        ? 'bg-blue-600 border-blue-400 text-white shadow-md scale-105 z-10' 
+                        ? 'bg-blue-600/90 border-blue-400 text-white shadow-lg ring-2 ring-blue-400/60 scale-105 z-10' 
                         : isDone 
-                          ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400' 
-                          : 'bg-slate-950 border-slate-800/80 text-slate-400 hover:border-slate-700'
+                          ? 'bg-emerald-500/30 border-emerald-400/50 text-emerald-200 hover:bg-emerald-500/40' 
+                          : !isUnlocked
+                            ? 'bg-white/5 border-white/5 text-slate-500/50 cursor-not-allowed'
+                            : 'bg-white/15 hover:bg-white/25 border-white/25 text-white hover:scale-102'
                     }`}
                   >
-                    <span>{targetLvl}</span>
-                    {isDone && <span className="absolute bottom-0.5 text-[6px] text-emerald-500 font-extrabold tracking-tighter">CLEAR</span>}
+                    {!isUnlocked ? (
+                      <Lock size={13} className="text-slate-300/50" />
+                    ) : (
+                      <span>{targetLvl}</span>
+                    )}
                   </button>
                 );
               })}
@@ -2361,6 +2711,69 @@ function NutBoltGame() {
         </div>
       )}
       {/* END MODAL: LEVEL SELECTOR / BROWSER */}
+
+      {/* ======================================================
+          MODAL: COMPLETED STAGE NOTICE
+          Shown when selecting a level that has already been cleared.
+          Informs user stage is cleared and allows returning to
+          level selector or replaying.
+          ====================================================== */}
+      {completedLevelNotice !== null && (
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="w-full max-w-xs bg-white/15 backdrop-blur-2xl border border-white/30 rounded-[32px] p-6 text-center space-y-4 shadow-[0_25px_60px_rgba(0,0,0,0.35)] text-white">
+            <div className="w-14 h-14 bg-emerald-400/20 border-2 border-emerald-300/40 rounded-full flex items-center justify-center mx-auto text-emerald-300 backdrop-blur-md shadow-sm">
+              <CheckCircle2 size={32} />
+            </div>
+            <div>
+              <h2 className="text-xl font-black uppercase tracking-tight drop-shadow-sm">STAGE COMPLETED!</h2>
+              <p className="text-xs text-slate-200 font-medium mt-1">Stage {completedLevelNotice} is already completed.</p>
+              
+              <div className="bg-white/10 rounded-2xl p-3 border border-white/20 text-xs space-y-1.5 mt-3">
+                <div className="flex justify-between font-bold text-slate-200">
+                  <span>Best Record:</span>
+                  <span className="text-emerald-300 font-black">
+                    {levelRecords[completedLevelNotice] !== undefined ? `${levelRecords[completedLevelNotice]} moves` : '-'}
+                  </span>
+                </div>
+                <div className="flex justify-between font-bold text-slate-200">
+                  <span>Level Par:</span>
+                  <span className="text-sky-300 font-black">
+                    {getLevelPar(generateDeterministicLevelConfig(completedLevelNotice, bgColor))} moves
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetLvl = completedLevelNotice;
+                  setCompletedLevelNotice(null);
+                  setShowLevelBrowser(true);
+                  setBrowserPage(Math.floor((targetLvl - 1) / 30));
+                }}
+                className="w-full py-3 bg-blue-600/90 hover:bg-blue-500 font-black text-xs rounded-2xl uppercase tracking-wider shadow-lg active:scale-98 transition-all border border-blue-400/40 backdrop-blur-md"
+              >
+                LEVEL SELECTOR
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetLvl = completedLevelNotice;
+                  setCompletedLevelNotice(null);
+                  setLevel(targetLvl);
+                  loadAndGenerateLevel(true);
+                }}
+                className="w-full py-2.5 bg-white/15 hover:bg-white/25 font-bold text-xs rounded-2xl uppercase tracking-wider text-slate-200 border border-white/20 backdrop-blur-md"
+              >
+                REPLAY STAGE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* END MODAL: COMPLETED STAGE NOTICE */}
 
     </div>
   );

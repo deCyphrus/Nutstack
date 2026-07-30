@@ -7,10 +7,9 @@
 // nothing to fetch or fail to load; every browser that runs this game
 // already has what it needs.
 //
-// The AudioContext is created lazily (browsers require it to happen
-// after a user gesture like a click, which is exactly when these are
-// called from), and every exported function takes an `enabled` flag
-// so call sites don't need their own if-checks.
+// The AudioContext is managed resilience-first: handles tab blur/focus,
+// mobile app suspend/resume, iOS background interrupt, and automatically
+// recreates closed contexts.
 // ============================================================
 
 let ctx: AudioContext | null = null;
@@ -18,32 +17,99 @@ let ctx: AudioContext | null = null;
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   try {
-    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AC) return null;
-    if (!ctx) ctx = new AC();
-    if (ctx.state === 'suspended') {
+
+    if (ctx && ctx.state === 'closed') {
+      ctx = null;
+    }
+
+    if (!ctx) {
+      ctx = new AC();
+    }
+
+    if (ctx.state === 'suspended' || (ctx.state as string) === 'interrupted') {
       ctx.resume().catch(() => {});
     }
     return ctx;
-  } catch (e) {
+  } catch {
+    ctx = null;
     return null;
   }
 }
 
+// Global auto-unlock and recovery listener for tab focus / app reopen / user gestures
+if (typeof window !== 'undefined') {
+  const unlockAudio = () => {
+    try {
+      if (ctx && ctx.state === 'closed') {
+        ctx = null;
+      }
+      const c = getCtx();
+      if (c && (c.state === 'suspended' || (c.state as string) === 'interrupted')) {
+        c.resume().then(() => {
+          // Play a silent 1-frame buffer to reliably unlock iOS AudioContext
+          try {
+            const buffer = c.createBuffer(1, 1, 22050);
+            const source = c.createBufferSource();
+            source.buffer = buffer;
+            source.connect(c.destination);
+            source.start(0);
+          } catch {
+            // Ignore unlock errors
+          }
+        }).catch(() => {});
+      }
+    } catch {
+      ctx = null;
+    }
+  };
+
+  ['pointerdown', 'touchstart', 'click', 'focus', 'pageshow'].forEach((evt) => {
+    window.addEventListener(evt, unlockAudio, { capture: true, passive: true });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      unlockAudio();
+    }
+  });
+}
+
 function tone(freqHz: number, startOffset: number, duration: number, type: OscillatorType, peakGain: number) {
-  const c = getCtx();
-  if (!c) return;
-  const osc = c.createOscillator();
-  const gain = c.createGain();
-  osc.type = type;
-  osc.frequency.value = freqHz;
-  const t0 = c.currentTime + startOffset;
-  gain.gain.setValueAtTime(0.0001, t0);
-  gain.gain.linearRampToValueAtTime(peakGain, t0 + 0.006);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
-  osc.connect(gain).connect(c.destination);
-  osc.start(t0);
-  osc.stop(t0 + duration + 0.02);
+  try {
+    const c = getCtx();
+    if (!c || c.state === 'closed') return;
+
+    if (c.state === 'suspended' || (c.state as string) === 'interrupted') {
+      c.resume().then(() => {
+        playTone(c, freqHz, startOffset, duration, type, peakGain);
+      }).catch(() => {});
+    } else {
+      playTone(c, freqHz, startOffset, duration, type, peakGain);
+    }
+  } catch {
+    ctx = null;
+  }
+}
+
+function playTone(c: AudioContext, freqHz: number, startOffset: number, duration: number, type: OscillatorType, peakGain: number) {
+  try {
+    if (c.state === 'closed') return;
+    const osc = c.createOscillator();
+    const gain = c.createGain();
+    osc.type = type;
+    osc.frequency.value = freqHz;
+    const t0 = c.currentTime + startOffset;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.linearRampToValueAtTime(peakGain, t0 + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(gain).connect(c.destination);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.02);
+  } catch {
+    if (c === ctx) ctx = null;
+  }
 }
 
 // Soft tick when a nut/bolt is picked up (selected).
@@ -53,19 +119,26 @@ export function playPickup(enabled: boolean) {
 }
 
 // Low double-thud when a nut lands on a bolt.
-export function playPlace(enabled: boolean) {
+// `stackHeightRatio` ranges from 0.0 (bottom of bolt) to 1.0 (top of bolt)
+export function playPlace(enabled: boolean, stackHeightRatio: number = 0) {
   if (!enabled) return;
-  tone(200, 0, 0.09, 'sine', 0.16);
-  tone(95, 0.01, 0.14, 'sine', 0.12);
+  const clampedRatio = Math.min(Math.max(stackHeightRatio, 0), 1);
+  // Pitch rises slightly as nuts stack higher on the bolt (1.0x at bottom up to 1.35x at top)
+  const mult = 1 + (clampedRatio * 0.35);
+
+  tone(200 * mult, 0, 0.09, 'sine', 0.16);
+  tone(95 * mult, 0.01, 0.14, 'sine', 0.12);
 }
 
 // Bright ascending chime when a bolt fully locks.
 // `stepIndex` (0, 1, 2...) raises the pitch for each consecutive bolt completed in the level.
-const PITCH_STEPS = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24]; // Major pentatonic / diatonic scale steps
+// Uses a smooth major scale progression that never caps out no matter how many bolts exist.
+const MAJOR_SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11];
 
 export function playLock(enabled: boolean, stepIndex: number = 0) {
   if (!enabled) return;
-  const semitones = PITCH_STEPS[Math.min(stepIndex, PITCH_STEPS.length - 1)] || (stepIndex * 2);
+  const oct = Math.floor(stepIndex / MAJOR_SCALE_STEPS.length);
+  const semitones = oct * 12 + MAJOR_SCALE_STEPS[stepIndex % MAJOR_SCALE_STEPS.length];
   const mult = Math.pow(2, semitones / 12);
 
   const f1 = 523.25 * mult; // C5 * mult

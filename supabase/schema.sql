@@ -27,3 +27,25 @@ create policy "Anyone can insert a leaderboard row"
 create policy "Anyone can update a leaderboard row"
   on public.leaderboard for update
   using (true);
+
+-- Global level records (best move count per level across all players)
+create table if not exists public.level_records (
+  level integer primary key,
+  record_moves integer not null,
+  holder_username text not null default 'AAA',
+  updated_at timestamptz not null default now()
+);
+
+alter table public.level_records enable row level security;
+
+create policy "Level records are publicly readable"
+  on public.level_records for select
+  using (true);
+
+create policy "Anyone can insert a level record"
+  on public.level_records for insert
+  with check (true);
+
+create policy "Anyone can update a level record"
+  on public.level_records for update
+  using (true);
