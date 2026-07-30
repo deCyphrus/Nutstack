@@ -721,6 +721,7 @@ function NutBoltGame() {
   const dragPreviewRefs = useRef({});
   const lastSoundPlayedLevelRef = useRef(null);
   const lastTouchTimeRef = useRef(0);
+  const prevBgColorRef = useRef(bgColor);
   // ----------------------------------------------------------
   // END SUB-SECTION: STATE DECLARATIONS
   // ----------------------------------------------------------
@@ -938,16 +939,14 @@ function NutBoltGame() {
         .select('username, total_score, levels_played');
       if (error) throw error;
       if (!data) return;
-      setPlayerScores(prev => {
-        const merged = { ...prev };
-        for (const row of data) {
-          merged[row.username] = {
-            totalScore: row.total_score,
-            levelsPlayed: row.levels_played,
-          };
-        }
-        return merged;
-      });
+      const newScores: { [uname: string]: { totalScore: number; levelsPlayed: number } } = {};
+      for (const row of data) {
+        newScores[row.username] = {
+          totalScore: row.total_score,
+          levelsPlayed: row.levels_played,
+        };
+      }
+      setPlayerScores(newScores);
     } catch (err) {
       console.warn('Global leaderboard fetch failed, showing local data only:', err);
     }
@@ -1111,9 +1110,11 @@ function NutBoltGame() {
   // ----------------------------------------------------------
   useEffect(() => {
     if (isInitialLoadDone) {
-      loadAndGenerateLevel();
+      const bgChanged = prevBgColorRef.current !== bgColor;
+      prevBgColorRef.current = bgColor;
+      loadAndGenerateLevel(bgChanged);
     }
-  }, [level, isInitialLoadDone]);
+  }, [level, bgColor, isInitialLoadDone]);
   // ----------------------------------------------------------
   // END SUB-SECTION: EFFECT — LOAD / GENERATE LEVEL ON LEVEL CHANGE
   // ----------------------------------------------------------
@@ -2807,11 +2808,13 @@ function NutBoltGame() {
                     type="button" 
                     onClick={async () => {
                       await syncPlayerStateToCloud();
+                      await fetchGlobalLeaderboard();
+                      await fetchGlobalLevelRecords();
                       window.location.reload();
                     }} 
-                    className="w-full py-2.5 bg-white/15 hover:bg-white/25 text-slate-100 text-xs font-bold rounded-2xl uppercase transition-colors border border-white/20 backdrop-blur-md"
+                    className="w-full py-2.5 bg-white/15 hover:bg-white/25 text-slate-100 text-xs font-bold rounded-2xl uppercase transition-colors border border-white/20 backdrop-blur-md flex items-center justify-center gap-2"
                   >
-                    Refresh App
+                    <span>🔄 Refresh & Sync Leaderboard</span>
                   </button>
                   <button 
                     type="button" 
